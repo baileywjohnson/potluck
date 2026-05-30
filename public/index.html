@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gamble Party</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Patrick+Hand&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Shown while the socket is down and we're trying to reclaim the seat. -->
+  <div id="reconnectOverlay" class="overlay">
+    <div class="overlay-card">
+      <div class="spinner"></div>
+      <p id="reconnectMsg">Connection lost — reconnecting…</p>
+    </div>
+  </div>
+
+  <!-- Persistent wallet bar, shown once you're in a room. -->
+  <div id="topbar" class="topbar hidden">
+    <span class="tb-name" id="tbName"></span>
+    <span class="tb-bankroll">💰 Bankroll: <strong id="tbBankroll">0</strong></span>
+  </div>
+
+  <div id="app">
+
+    <!-- JOIN -->
+    <section id="screen-join" class="screen active">
+      <div class="card">
+        <h1>🎲 Gamble Party</h1>
+        <p class="subtitle">Compete in minigames. Bet chips on who wins.</p>
+        <input id="nameInput" maxlength="16" placeholder="Your name" autocomplete="off" />
+        <button id="createBtn" class="primary">Create room</button>
+        <div class="divider"><span>or</span></div>
+        <div class="join-row">
+          <input id="codeInput" maxlength="4" placeholder="CODE" class="code-input" autocomplete="off" />
+          <button id="joinBtn">Join</button>
+        </div>
+        <p id="joinError" class="error"></p>
+      </div>
+    </section>
+
+    <!-- LOBBY -->
+    <section id="screen-lobby" class="screen">
+      <div class="card">
+        <h2>Lobby</h2>
+        <p>Room code: <span id="lobbyCode" class="code-badge"></span></p>
+        <p class="hint">Share the code so friends can join. Need at least <span id="minPlayers">2</span> players.</p>
+
+        <div id="modeControls" class="mode-controls">
+          <div class="seg" id="modeSeg">
+            <button id="modeLowBtn" class="seg-btn">Low-stakes</button>
+            <button id="modeHighBtn" class="seg-btn">High-stakes</button>
+          </div>
+          <div id="buyInRow" class="buyin-row">
+            <label for="buyInInput">Buy-in (from bankroll)</label>
+            <input id="buyInInput" type="number" min="1" />
+          </div>
+          <p id="modeSummary" class="hint"></p>
+        </div>
+
+        <ul id="lobbyPlayers" class="player-list"></ul>
+        <button id="startBtn" class="primary">Start match</button>
+        <p id="lobbyHint" class="hint"></p>
+        <button id="leaveBtn" class="ghost">← Leave room</button>
+      </div>
+    </section>
+
+    <!-- BETTING -->
+    <section id="screen-betting" class="screen betting-screen">
+      <div class="bet-head">
+        <span class="bet-meta">Round <b id="betRound"></b> · <b id="betGameName"></b></span>
+        <span class="bet-stakes" id="betStakes"></span>
+      </div>
+      <p class="bet-tagline" id="betTagline"></p>
+
+      <!-- The felt: pot in the center, players seated around it. -->
+      <div class="felt" id="felt">
+        <div class="felt-center">
+          <div class="pot-chip">
+            <span class="pot-label">POT</span>
+            <strong id="potAmount">0</strong>
+          </div>
+          <div class="felt-sub" id="feltSub"></div>
+        </div>
+        <div id="betChips"></div>
+        <div id="seats"></div>
+      </div>
+
+      <div id="betSpectatorBanner" class="spectator-banner hidden"></div>
+
+      <!-- Your controls (only shown on your turn). -->
+      <div class="action-bar hidden" id="pokerActions">
+        <div class="turn-timer"><div class="turn-timer-fill" id="turnFill"></div></div>
+        <div class="to-call" id="toCallInfo"></div>
+        <div class="action-buttons">
+          <button data-act="fold" class="pa fold">Fold</button>
+          <button data-act="check" class="pa">Check</button>
+          <button data-act="call" class="pa call">Call</button>
+          <button data-act="bet" class="pa primary">Bet</button>
+          <button data-act="raise" class="pa primary">Raise</button>
+        </div>
+      </div>
+      <p id="betStatus" class="bet-turn-status"></p>
+      <p id="betError" class="error"></p>
+    </section>
+
+    <!-- COUNTDOWN -->
+    <section id="screen-countdown" class="screen">
+      <div class="countdown-big" id="countdownNum">3</div>
+    </section>
+
+    <!-- PLAYING -->
+    <section id="screen-playing" class="screen">
+      <div id="playSpectatorBanner" class="spectator-banner hidden">
+        👀 Spectating — watching the action live.
+      </div>
+      <div class="game-hud">
+        <div class="timer" id="gameTimer">--</div>
+        <div class="pot-display small" id="playPot"></div>
+        <div id="gameScores" class="scoreboard"></div>
+      </div>
+      <canvas id="gameCanvas" width="900" height="560"></canvas>
+      <p class="hint">Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrow keys.</p>
+    </section>
+
+    <!-- RESULTS -->
+    <section id="screen-results" class="screen">
+      <div class="card wide">
+        <h2>Round <span id="resRound"></span> results</h2>
+        <p class="winner-line" id="resWinnerLine"></p>
+        <div class="results-cols">
+          <div>
+            <h3>Minigame scores</h3>
+            <ul id="resScores" class="score-list"></ul>
+          </div>
+          <div>
+            <h3>Chip results <span class="hint" id="resPool"></span></h3>
+            <ul id="resPayouts" class="payout-list"></ul>
+          </div>
+        </div>
+        <p class="hint">Next round starting soon…</p>
+      </div>
+    </section>
+
+    <!-- GAME OVER -->
+    <section id="screen-gameover" class="screen">
+      <div class="card">
+        <h2>🏁 Final standings</h2>
+        <ul id="finalStandings" class="standings"></ul>
+        <button id="lobbyBtn" class="primary">Back to lobby</button>
+        <p id="gameoverHint" class="hint"></p>
+      </div>
+    </section>
+
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- Side bets: challenge another player to a coin flip from your bankroll. -->
+  <aside id="sideBets" class="sidebets hidden">
+    <div class="sidebets-title">🪙 Side bets</div>
+    <ul id="sideBetList"></ul>
+    <div id="sideBetForm" class="sidebet-form hidden">
+      <div class="sbf-label">Coin flip vs <b id="sbfName"></b></div>
+      <div class="sbf-row">
+        <input id="sbfAmount" type="number" min="1" placeholder="amount" />
+        <button id="sbfFlip" class="pa primary">Flip!</button>
+      </div>
+      <div id="sbfError" class="error"></div>
+    </div>
+    <p class="sidebets-hint">Tap a player, then wager. They flip to accept.</p>
+  </aside>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>

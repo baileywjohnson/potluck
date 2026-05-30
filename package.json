@@ -1,0 +1,18 @@
+{
+  "name": "gamble-party",
+  "version": "0.1.0",
+  "description": "A multiplayer browser party game where players compete in minigames and gamble play-money chips on the outcome.",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}

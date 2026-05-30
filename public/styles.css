@@ -1,0 +1,412 @@
+/* ===========================================================================
+   Gamble Party — "warm parchment sketchbook" theme.
+   Hand-drawn fonts, paper background, sketchy ink-outlined shapes, and chunky
+   board-game pieces with paper-cutout shadows.
+   =========================================================================== */
+:root {
+  --bg: #e7d5af;            /* warm parchment */
+  --paper: #fbf3e1;         /* card / token paper */
+  --paper2: #f4e8cd;        /* inset paper */
+  --surface: #f4e8cd;
+  --card: #fbf3e1;
+  --accent: #d99836;        /* ochre */
+  --accent-ink: #a76a22;    /* darker ochre for text */
+  --accent2: #6fa85d;       /* board-game green */
+  --danger: #cf6a4f;        /* terracotta */
+  --text: #4b3826;          /* brown ink */
+  --ink: #4b3826;
+  --muted: #8a7250;         /* faded ink */
+  --line: #c7ad7f;          /* tan pencil line */
+  --rail: #b07a44;          /* table wood */
+  --shadow: rgba(75, 56, 38, .22);
+  /* Hand-drawn wonky corners: opposite corners differ so boxes look sketched. */
+  --sketch: 220px 14px 200px 16px / 14px 200px 16px 220px;
+  --sketch-card: 235px 18px 255px 18px / 18px 255px 18px 235px;
+  --sketch-pill: 120px 9px 110px 9px / 9px 110px 9px 120px;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  overflow: hidden; /* the page itself never scrolls; screens fit the viewport */
+  font-family: 'Patrick Hand', 'Segoe UI', system-ui, sans-serif;
+  font-size: 18px;
+  color: var(--text);
+  background: radial-gradient(125% 95% at 50% 0%, #f5ead0 0%, #e7d5af 55%, #dac698 100%);
+}
+
+/* Subtle paper grain. */
+body::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: .06; mix-blend-mode: multiply;
+}
+/* Gentle vignette so the page reads like a worn, lamp-lit page. */
+body::after {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background: radial-gradient(115% 85% at 50% 38%, transparent 52%, rgba(75,56,38,.16) 100%);
+}
+
+#app {
+  position: relative; z-index: 1;
+  height: 100vh; height: 100dvh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 54px 14px 14px; /* top room for the fixed wallet bar */
+  overflow: hidden;
+}
+
+.screen { display: none; width: 100%; flex-direction: column; align-items: center; }
+.screen.active { display: flex; max-height: 100%; overflow-y: auto; }
+
+.card {
+  background: var(--paper);
+  border: 2.5px solid var(--ink);
+  border-radius: var(--sketch-card);
+  padding: 30px;
+  width: 100%;
+  max-width: 460px;
+  box-shadow: 6px 8px 0 var(--shadow);
+  text-align: center;
+}
+.card.wide { max-width: 760px; }
+
+h1 { font-family: 'Caveat', cursive; font-weight: 700; font-size: 3.1rem; margin: 0 0 2px; color: var(--ink); }
+h2 { font-family: 'Caveat', cursive; font-weight: 700; font-size: 2.1rem; margin: 0 0 10px; color: var(--ink); }
+h3 { margin: 0 0 10px; color: var(--muted); font-size: 1rem; letter-spacing: .03em; }
+.subtitle { color: var(--muted); margin-top: 0; margin-bottom: 22px; }
+
+input {
+  width: 100%;
+  padding: 13px 16px;
+  margin: 8px 0;
+  border: 2px solid var(--ink);
+  border-radius: var(--sketch);
+  background: var(--paper2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 1rem;
+}
+input::placeholder { color: #b29a73; }
+input:focus { outline: 2px dashed var(--accent); outline-offset: 2px; border-color: var(--accent-ink); }
+
+button {
+  padding: 12px 20px;
+  border: 2.5px solid var(--ink);
+  border-radius: var(--sketch);
+  font-family: inherit;
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+  background: var(--paper2);
+  color: var(--ink);
+  box-shadow: 2px 3px 0 var(--shadow);
+  transition: transform .08s ease, box-shadow .08s ease;
+}
+button:hover { transform: translateY(-1px); box-shadow: 3px 4px 0 var(--shadow); }
+button:active { transform: translate(1px, 2px); box-shadow: 1px 1px 0 var(--shadow); }
+button:disabled { opacity: .5; cursor: not-allowed; box-shadow: 2px 3px 0 var(--shadow); transform: none; }
+button.primary { background: var(--accent); color: #3a2410; width: 100%; margin-top: 8px; }
+button.ghost { background: transparent; }
+
+.divider { display: flex; align-items: center; gap: 12px; color: var(--muted); margin: 18px 0; }
+.divider::before, .divider::after { content: ''; flex: 1; height: 2px; background: var(--line); border-radius: 2px; }
+
+.join-row { display: flex; gap: 8px; }
+.join-row input { margin: 0; }
+.code-input { text-transform: uppercase; letter-spacing: .3em; text-align: center; font-weight: 700; }
+.join-row button { white-space: nowrap; }
+
+.error { color: var(--danger); min-height: 1.2em; margin: 8px 0 0; }
+.status { color: var(--accent2); min-height: 1.2em; }
+.hint { color: var(--muted); font-size: .92rem; }
+.label { text-align: left; color: var(--muted); margin-top: 18px; }
+.blurb { color: var(--muted); font-style: italic; }
+
+.code-badge {
+  font-weight: 700; letter-spacing: .2em; font-size: 1.4rem; color: var(--accent-ink);
+  background: var(--paper2); border: 2px solid var(--ink); padding: 2px 14px; border-radius: var(--sketch-pill);
+}
+.chips { color: var(--accent-ink); }
+
+.player-list, .standings, .score-list, .payout-list { list-style: none; padding: 0; text-align: left; }
+.player-list li, .standings li {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 11px 16px; margin: 8px 0; background: var(--paper2);
+  border: 2px solid var(--line); border-radius: var(--sketch);
+}
+.host-tag { font-size: .72rem; color: var(--accent-ink); border: 2px solid var(--accent-ink); padding: 1px 7px; border-radius: var(--sketch-pill); margin-left: 8px; }
+
+.phase-header { display: flex; justify-content: space-between; align-items: center; }
+.timer { font-family: 'Caveat', cursive; font-size: 2.2rem; font-weight: 700; color: var(--accent-ink); }
+
+/* ===== Poker felt table ===== */
+.betting-screen { justify-content: center; width: 100%; max-width: 720px; }
+.bet-head { width: 100%; display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 1rem; }
+.bet-head b { color: var(--ink); }
+.bet-stakes { color: var(--accent-ink); font-weight: 700; }
+.bet-tagline { color: var(--muted); font-size: 1rem; margin: 4px 0 8px; text-align: center; }
+.bet-tagline b { color: var(--ink); }
+
+.felt {
+  /* Fit within both the available height and width without distorting.
+     The generous top/bottom margins reserve room for seat labels that sit
+     just outside the rim. */
+  position: relative; aspect-ratio: 16 / 11;
+  width: min(92vw, 620px, calc(40vh * 16 / 11)); margin: 62px auto;
+  background: radial-gradient(ellipse at 50% 40%, #82bb6a 0%, #6fa85a 55%, #5e8f4c 100%);
+  border: 13px solid var(--rail); border-radius: 47% / 50%;
+  box-shadow: 6px 10px 0 var(--shadow), inset 0 0 0 3px #8a5a30, inset 0 0 44px rgba(54,38,20,.22);
+}
+/* Stitched felt edge — a ::before so it paints BEHIND the seats and chips. */
+.felt::before {
+  content: ''; position: absolute; inset: 9px; border: 2px dashed rgba(255,255,255,.45);
+  border-radius: 47% / 50%; pointer-events: none;
+}
+
+/* Center pot — a round paper token. */
+.felt-center { position: absolute; left: 50%; top: 42%; transform: translate(-50%,-50%); text-align: center; pointer-events: none; }
+.pot-chip {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  width: 92px; height: 92px; margin: 0 auto;
+  background: var(--paper); border: 3px solid var(--ink); border-radius: 50%;
+  box-shadow: 3px 4px 0 var(--shadow);
+}
+/* "POT" floats near the top; the number is centered on its own in the circle. */
+.pot-label { position: absolute; top: 15px; left: 0; right: 0; text-align: center; font-size: .58rem; letter-spacing: .25em; color: var(--muted); }
+.pot-chip strong { font-family: 'Caveat', cursive; font-size: 2.4rem; color: var(--accent-ink); line-height: 1; transform: translateX(-10px); }
+.felt-sub { margin-top: 8px; font-size: .9rem; color: #2f4a24; min-height: 1em; }
+
+/* Seats — the box is just the avatar; labels are positioned outward from it. */
+.seat { position: absolute; transform: translate(-50%,-50%); width: 52px; height: 52px; }
+.seat .avatar {
+  width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-family: 'Patrick Hand', sans-serif; font-weight: 700; font-size: 1.15rem; color: #3a2410;
+  border: 3px solid var(--ink); box-shadow: 2px 3px 0 var(--shadow); transition: box-shadow .2s ease;
+}
+.seat-labels {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+}
+.seat.is-bottom .seat-labels { top: calc(100% + 6px); }
+.seat.is-top .seat-labels { bottom: calc(100% + 6px); flex-direction: column-reverse; }
+/* Name + stack sit on a little paper plate so they stay readable over the felt. */
+.seat-plate {
+  padding: 2px 10px; background: var(--paper); border: 2px solid var(--ink);
+  border-radius: var(--sketch-pill); box-shadow: 1px 2px 0 var(--shadow); text-align: center; line-height: 1.1;
+}
+.seat-name { font-size: .92rem; font-weight: 700; color: var(--ink); max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seat-stack { font-size: .8rem; color: var(--muted); }
+.seat-stack b { color: var(--accent-ink); }
+.seat-badge {
+  font-size: .72rem; font-weight: 700; letter-spacing: .03em; padding: 1px 9px;
+  background: var(--paper); border: 2px solid var(--ink); border-radius: var(--sketch-pill); color: var(--muted);
+}
+.seat-badge.empty { visibility: hidden; }
+.seat-badge.act-check { color: var(--muted); }
+.seat-badge.act-call { color: #3f7a30; border-color: #3f7a30; }
+.seat-badge.act-bet, .seat-badge.act-raise { color: var(--accent-ink); border-color: var(--accent-ink); }
+.seat-badge.act-fold { color: var(--danger); border-color: var(--danger); }
+.seat-badge.act-allin { color: var(--paper); background: var(--danger); border-color: var(--ink); }
+.seat-badge.pop { animation: badgePop .35s ease; }
+@keyframes badgePop { 0% { transform: scale(.5);} 60% { transform: scale(1.18);} 100% { transform: scale(1);} }
+
+.seat.to-act .avatar { box-shadow: 0 0 0 4px var(--accent), 3px 4px 0 var(--shadow); animation: seatPulse 1.2s ease-in-out infinite; }
+.seat.to-act .seat-name { color: var(--accent-ink); }
+@keyframes seatPulse {
+  0%,100% { box-shadow: 0 0 0 4px var(--accent), 0 0 8px rgba(217,152,54,.5), 3px 4px 0 var(--shadow); }
+  50% { box-shadow: 0 0 0 5px var(--accent), 0 0 22px rgba(217,152,54,.9), 3px 4px 0 var(--shadow); }
+}
+.seat.folded { opacity: .42; }
+.seat.away .seat-name::after { content: ' · away'; color: var(--danger); font-size: .85em; }
+
+.dealer-btn {
+  position: absolute; bottom: -3px; right: -5px; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--paper); color: var(--ink); font-size: .72rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; border: 2px solid var(--ink); box-shadow: 1px 2px 0 var(--shadow);
+}
+
+/* Chips each player has pushed in, shown in front of their seat. */
+.bet-chip {
+  position: absolute; transform: translate(-50%,-50%);
+  background: var(--paper); border: 2px solid var(--ink); color: var(--accent-ink);
+  font-weight: 700; font-size: .82rem; padding: 2px 9px; border-radius: var(--sketch-pill); white-space: nowrap;
+  box-shadow: 1px 2px 0 var(--shadow); transition: left .3s ease, top .3s ease;
+}
+.bet-chip::before { content: '🪙 '; }
+
+/* Your action bar */
+.action-bar { width: 100%; max-width: 660px; margin: 16px auto 0; text-align: center; }
+.action-bar.hidden { display: none; }
+.turn-timer { height: 7px; background: var(--paper2); border: 2px solid var(--ink); border-radius: 999px; overflow: hidden; margin: 0 auto 10px; max-width: 320px; }
+.turn-timer-fill { height: 100%; width: 100%; background: var(--accent); }
+.to-call { color: var(--muted); font-size: 1rem; margin-bottom: 8px; min-height: 1.1em; }
+.to-call b { color: var(--accent-ink); }
+.action-buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.action-buttons .pa { min-width: 112px; font-size: 1.1rem; padding: 12px 18px; }
+/* Keep Bet/Raise (which carry .primary) the same size as the others. */
+.action-buttons .pa.primary { width: auto; margin-top: 0; }
+.pa.call { background: var(--accent2); color: #1f3d18; }
+.pa.fold { background: var(--danger); color: #fff4ef; }
+.pa.hidden { display: none; }
+.bet-turn-status { text-align: center; color: var(--muted); margin-top: 12px; min-height: 1.2em; font-size: 1.05rem; }
+
+/* Small pot readout reused in the playing HUD. */
+.pot-display.small { font-size: .95rem; color: var(--muted); }
+.pot-display.small strong { color: var(--accent-ink); margin-left: 4px; }
+
+@media (max-width: 560px) {
+  .seat { width: 44px; height: 44px; }
+  .seat .avatar { width: 44px; height: 44px; font-size: 1rem; }
+  .seat-name { font-size: .82rem; }
+  .action-buttons .pa { min-width: 84px; font-size: 1rem; padding: 11px 12px; }
+}
+
+/* Countdown */
+.countdown-big { font-family: 'Caveat', cursive; font-size: clamp(7rem, 24vh, 13rem); font-weight: 700; color: var(--accent-ink); animation: pop .6s ease; }
+@keyframes pop { from { transform: scale(.4) rotate(-6deg); opacity: 0; } to { transform: scale(1) rotate(0); opacity: 1; } }
+
+/* Playing — HUD and canvas share one width so their edges line up exactly.
+   (900x560 is the Coin Rush arena aspect ratio.) */
+#screen-playing { --stage: min(900px, 96vw, calc(62vh * 900 / 560)); }
+.game-hud { width: var(--stage); display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
+.scoreboard { display: flex; gap: 10px; flex-wrap: wrap; }
+.scoreboard .sb { padding: 4px 12px; border: 2px solid var(--ink); border-radius: var(--sketch-pill); background: var(--paper); font-weight: 700; }
+#gameCanvas {
+  width: var(--stage); height: auto;
+  background: #2c3f24; border: 3px solid var(--ink); border-radius: 16px; box-shadow: 6px 8px 0 var(--shadow);
+}
+kbd { background: var(--paper); border: 2px solid var(--ink); border-radius: 6px; padding: 0 7px; margin: 0 1px; font-size: .85em; }
+
+/* Results */
+.winner-line { font-family: 'Caveat', cursive; font-size: 1.9rem; color: var(--ink); }
+.results-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; text-align: left; }
+.score-list li, .payout-list li { padding: 8px 12px; margin: 6px 0; background: var(--paper2); border: 2px solid var(--line); border-radius: var(--sketch); display: flex; justify-content: space-between; }
+.net-pos { color: #3f7a30; }
+.net-neg { color: var(--danger); }
+
+.standings li:nth-child(1) { border-color: var(--accent); box-shadow: 2px 3px 0 var(--shadow); }
+.rank { font-family: 'Caveat', cursive; font-size: 1.4rem; font-weight: 700; color: var(--accent-ink); margin-right: 10px; }
+
+.hidden { display: none !important; }
+
+/* Top wallet bar */
+.topbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 40;
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 9px 18px; background: rgba(251,243,225,.95); border-bottom: 3px solid var(--ink);
+  font-size: 1.05rem; color: var(--ink);
+}
+.tb-name { color: var(--muted); }
+.tb-bankroll strong { color: var(--accent-ink); }
+
+/* Lobby stakes controls */
+.mode-controls { margin: 14px 0 6px; }
+.seg { display: inline-flex; border: 2.5px solid var(--ink); border-radius: var(--sketch); overflow: hidden; box-shadow: 2px 3px 0 var(--shadow); }
+.seg-btn { background: var(--paper2); border-radius: 0; padding: 9px 18px; font-weight: 700; box-shadow: none; border: none; }
+.seg-btn:hover { transform: none; box-shadow: none; }
+.seg-btn.active { background: var(--accent); color: #3a2410; }
+.buyin-row { margin-top: 12px; text-align: center; }
+.buyin-row label { display: block; color: var(--muted); font-size: .9rem; margin-bottom: 4px; }
+.buyin-row input { max-width: 180px; margin: 0; }
+
+/* Spectator banner */
+.spectator-banner {
+  background: #fff5df; border: 2px dashed var(--accent-ink); color: var(--accent-ink);
+  border-radius: var(--sketch); padding: 11px 16px; margin: 12px 0; font-weight: 700;
+}
+
+/* Status / role tags */
+.spec-tag { font-size: .72rem; color: var(--accent-ink); border: 2px solid var(--accent-ink); padding: 1px 7px; border-radius: var(--sketch-pill); margin-left: 8px; }
+.out-tag { font-size: .72rem; color: var(--danger); border: 2px solid var(--danger); padding: 1px 7px; border-radius: var(--sketch-pill); margin-left: 8px; }
+
+/* Reconnect overlay */
+.overlay {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(231,213,175,.78); backdrop-filter: blur(2px);
+  display: none; align-items: center; justify-content: center;
+}
+.overlay.active { display: flex; }
+.overlay-card { text-align: center; color: var(--ink); font-size: 1.1rem; }
+.spinner {
+  width: 46px; height: 46px; margin: 0 auto 16px;
+  border: 4px solid var(--line); border-top-color: var(--accent-ink);
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* "Away" badge for disconnected players */
+.away-tag { font-size: .72rem; color: var(--danger); border: 2px solid var(--danger); padding: 1px 7px; border-radius: var(--sketch-pill); margin-left: 8px; }
+
+/* Transient toast (side-bet challenges & results). */
+.toast {
+  position: fixed; top: 60px; left: 50%; transform: translateX(-50%); z-index: 60;
+  background: var(--paper); border: 2.5px solid var(--ink); border-radius: var(--sketch);
+  box-shadow: 4px 5px 0 var(--shadow); padding: 10px 18px; font-weight: 700; color: var(--ink);
+  max-width: 90vw; text-align: center; animation: badgePop .3s ease;
+}
+.toast.win { border-color: #3f7a30; }
+.toast.lose { border-color: var(--danger); }
+.toast.hidden { display: none; }
+
+/* ===== Side bets panel ===== */
+.sidebets {
+  position: fixed; top: 64px; left: 12px; z-index: 35; width: 220px;
+  background: var(--paper); border: 2.5px solid var(--ink); border-radius: var(--sketch-card);
+  box-shadow: 5px 7px 0 var(--shadow); padding: 12px 12px 10px; color: var(--ink);
+  max-height: calc(100dvh - 80px); overflow-y: auto;
+}
+.sidebets-title { font-family: 'Caveat', cursive; font-weight: 700; font-size: 1.5rem; text-align: center; margin-bottom: 6px; }
+.sidebets-hint { color: var(--muted); font-size: .8rem; text-align: center; margin: 8px 2px 0; }
+#sideBetList { list-style: none; padding: 0; margin: 0; }
+
+.sb-row {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px; margin: 5px 0;
+  background: var(--paper2); border: 2px solid var(--line); border-radius: var(--sketch); cursor: pointer;
+}
+.sb-row.selected { border-color: var(--accent); box-shadow: 1px 2px 0 var(--shadow); }
+.sb-row.away { opacity: .5; cursor: default; }
+.sb-row.incoming { border-color: var(--accent-ink); background: #fff5df; cursor: default; animation: nudge 1s ease-in-out infinite; }
+@keyframes nudge { 0%,100% { transform: translateX(0);} 50% { transform: translateX(-2px);} }
+.sb-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--ink); flex: 0 0 auto; }
+.sb-name { font-weight: 700; font-size: .92rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-bank { font-size: .76rem; color: var(--muted); white-space: nowrap; }
+.sb-actions { display: flex; gap: 4px; }
+.sb-mini { padding: 3px 8px; font-size: .78rem; min-width: 0; border-width: 2px; box-shadow: 1px 1px 0 var(--shadow); }
+.sb-mini.yes { background: var(--accent2); color: #1f3d18; }
+.sb-mini.no { background: var(--danger); color: #fff4ef; }
+.sb-wait { font-size: .72rem; color: var(--accent-ink); white-space: nowrap; }
+
+/* Coin slot + flip animation next to a player's name. */
+.coin-slot { min-width: 18px; display: inline-flex; align-items: center; justify-content: center; }
+.coin-slot .coin { display: inline-block; animation: coinspin 1.3s ease-in-out; }
+@keyframes coinspin {
+  0% { transform: rotateY(0) scale(1); }
+  100% { transform: rotateY(1980deg) scale(1.1); }
+}
+.coin-result { font-weight: 800; font-size: .82rem; animation: badgePop .35s ease; }
+.coin-result.win { color: #3f7a30; }
+.coin-result.lose { color: var(--danger); }
+
+.sidebet-form { margin-top: 8px; padding-top: 8px; border-top: 2px dashed var(--line); }
+.sbf-label { font-size: .85rem; color: var(--muted); margin-bottom: 4px; text-align: center; }
+.sbf-label b { color: var(--ink); }
+.sbf-row { display: flex; flex-direction: column; gap: 6px; }
+.sbf-row input { margin: 0; width: 100%; padding: 9px 12px; text-align: center; font-size: 1rem; }
+/* Drop the number spinners so the digits aren't crowded. */
+.sbf-row input::-webkit-inner-spin-button,
+.sbf-row input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.sbf-row .pa { width: 100%; min-width: 0; margin-top: 0; padding: 10px 12px; font-size: 1rem; }
+#sbfError { font-size: .78rem; }
+
+@media (max-width: 920px) {
+  .sidebets { width: 168px; top: 56px; left: 8px; }
+  .sidebets-title { font-size: 1.25rem; }
+  .sb-bank { display: none; }
+}
+
+@media (max-width: 680px) {
+  .results-cols { grid-template-columns: 1fr; }
+}

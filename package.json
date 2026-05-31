@@ -1,7 +1,7 @@
 {
-  "name": "gamble-party",
+  "name": "potluck",
   "version": "0.1.0",
-  "description": "A multiplayer browser party game where players compete in minigames and gamble play-money chips on the outcome.",
+  "description": "A multiplayer browser party game where players compete in minigames and wager play-money chips on the outcome.",
   "type": "module",
   "main": "server/index.js",
   "scripts": {

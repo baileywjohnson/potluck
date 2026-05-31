@@ -32,6 +32,14 @@ function splitByWeights(items, pot) {
   return out;
 }
 
+// Map total XP to a level and progress within it. Each level costs a bit more
+// than the last (level N -> N+1 needs N*100 XP), so leveling slows over time.
+function levelInfo(xp) {
+  let level = 1, need = 100, remaining = Math.max(0, Math.floor(xp || 0));
+  while (remaining >= need) { remaining -= need; level++; need = level * 100; }
+  return { level, xpInLevel: remaining, xpForLevel: need };
+}
+
 let nextRoomId = 1;
 function makeRoomCode() {
   // Short human-friendly code, e.g. "PMK". Collisions are handled by caller.
@@ -90,6 +98,7 @@ export class Room {
       socketId: socket.id,
       name: (name || 'Player').slice(0, 16),
       bankroll: CONFIG.STARTING_BANKROLL, // persistent wallet, kept between matches
+      xp: 0,                              // persistent experience (earned per minigame)
       chips: 0,                           // per-match stake, assigned at match start
       role,                               // 'player' (in the match) | 'spectator'
       eliminated: false,                  // busted out of the current match
@@ -352,22 +361,24 @@ export class Room {
     const winner = this.players.get(winnerId);
     const pot = this.poker.pot;
     if (winner) winner.chips += pot;
+    if (winnerId) this.awardXp(winnerId, CONFIG.XP_BASE + CONFIG.XP_WIN); // still won the round
     const payouts = winnerId ? { [winnerId]: pot } : {};
     this.lastResult = this.buildResult({ winnerId, scores: [], uncontested: true, payouts });
     this.poker = null;
     this.setPhase(Phase.RESULTS, CONFIG.RESULTS_MS, () => this.beginBetting());
   }
 
-  // ---- side bets (player-vs-player coin flips, settled from bankroll) -------
+  // ---- Side Bets (player-vs-player coin flips, settled from bankroll) -------
   // These run alongside the match and are independent of the poker pot.
 
   sideBetActive() {
-    return this.phase !== Phase.LOBBY && this.phase !== Phase.GAMEOVER;
+    // Allowed in the lobby and during a match; only blocked on the final screen.
+    return this.phase !== Phase.GAMEOVER;
   }
 
   // One player challenges another to a coin flip for `amount` from each bankroll.
   challengeSideBet(fromId, toId, amount) {
-    if (!this.sideBetActive()) return { error: 'Side bets run during a match.' };
+    if (!this.sideBetActive()) return { error: 'Side Bets are closed right now.' };
     const from = this.players.get(fromId);
     const to = this.players.get(toId);
     if (!from || !to || fromId === toId) return { error: 'Pick another player.' };
@@ -460,6 +471,13 @@ export class Room {
     }
   }
 
+  // Discrete actions (Space to lunge, left click to shoot). Optional per minigame.
+  handleAction(playerId, action, data) {
+    if (this.phase !== Phase.PLAYING || !this.game) return;
+    if (action === 'boost') this.game.boost?.(playerId);
+    else if (action === 'shoot') this.game.shoot?.(playerId, data);
+  }
+
   endPlaying() {
     clearInterval(this._tickTimer);
     this._tickTimer = null;
@@ -475,9 +493,21 @@ export class Room {
     const winner = result.winnerId ? this.players.get(result.winnerId) : null;
     if (winner) winner.wins += 1; // the top scorer still earns the "win"
 
+    // Award XP: everyone who played the minigame earns it (base + score + win bonus).
+    for (const s of result.scores) {
+      this.awardXp(s.id, CONFIG.XP_BASE
+        + Math.min(CONFIG.XP_SCORE_CAP, Math.max(0, s.score) * CONFIG.XP_PER_SCORE)
+        + (s.id === result.winnerId ? CONFIG.XP_WIN : 0));
+    }
+
     this.lastResult = this.buildResult({ winnerId: result.winnerId, scores: result.scores, payouts });
     this.poker = null;
     this.setPhase(Phase.RESULTS, CONFIG.RESULTS_MS, () => this.beginBetting());
+  }
+
+  awardXp(playerId, amount) {
+    const p = this.players.get(playerId);
+    if (p) p.xp = (p.xp || 0) + Math.max(0, Math.round(amount));
   }
 
   // Decide who gets what from the pot.
@@ -618,6 +648,7 @@ export class Room {
       players: [...this.players.values()].map((p) => ({
         id: p.id, name: p.name, bankroll: p.bankroll, chips: p.chips,
         role: p.role, eliminated: p.eliminated, wins: p.wins, connected: p.connected,
+        xp: p.xp || 0, ...levelInfo(p.xp), // level, xpInLevel, xpForLevel
       })),
       // Live betting-round state (pot, whose turn, commitments) when present.
       poker: this.poker ? this.poker.publicState() : null,

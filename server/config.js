@@ -19,6 +19,12 @@ export const CONFIG = {
   TOTAL_ROUNDS: num('TOTAL_ROUNDS', 5),        // how many minigames make up a match
   MIN_PLAYERS: num('MIN_PLAYERS', 2),          // participants needed to start a match
 
+  // Experience earned per minigame (persistent, drives player level).
+  XP_BASE: num('XP_BASE', 15),                 // for playing a minigame
+  XP_WIN: num('XP_WIN', 25),                   // bonus for winning it
+  XP_PER_SCORE: num('XP_PER_SCORE', 1),        // per point scored (e.g. coin), capped
+  XP_SCORE_CAP: num('XP_SCORE_CAP', 40),       // max score-based XP per minigame
+
   // Poker-style betting (fixed-limit). Each minigame is preceded by one betting
   // round: everyone antes, then bets/raises in fixed increments, winner of the
   // minigame takes the pot. Ante and bet are fractions of a player's starting
@@ -36,6 +42,7 @@ export const CONFIG = {
   // for them to rejoin before it is permanently freed.
   RECONNECT_GRACE_MS: num('RECONNECT_GRACE_MS', 60000),
 
-  // Server simulation.
-  TICK_HZ: num('TICK_HZ', 20),                 // authoritative simulation + broadcast rate
+  // Server simulation. Clients interpolate between snapshots, so this is the
+  // network/sim rate, not the on-screen frame rate (which is the display's).
+  TICK_HZ: num('TICK_HZ', 30),                 // authoritative simulation + broadcast rate
 };

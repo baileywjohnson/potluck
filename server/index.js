@@ -43,7 +43,9 @@ io.on('connection', (socket) => {
     const player = room.addPlayer(socket, name);
     bind(socket, room.code, player.id);
     // The token is the player's private reconnect key — only ever sent here.
-    ack?.({ ok: true, code: room.code, playerId: player.id, token: player.token });
+    // Return the state too so the client renders immediately (not just on the
+    // next broadcast — which may not arrive for a while mid-match).
+    ack?.({ ok: true, code: room.code, playerId: player.id, token: player.token, state: room.getPublicState() });
   });
 
   socket.on('room:join', ({ code, name }, ack) => {
@@ -54,7 +56,7 @@ io.on('connection', (socket) => {
     // Joining mid-match is allowed — you spectate this match and play the next.
     const player = room.addPlayer(socket, name);
     bind(socket, room.code, player.id);
-    ack?.({ ok: true, code: room.code, playerId: player.id, token: player.token });
+    ack?.({ ok: true, code: room.code, playerId: player.id, token: player.token, state: room.getPublicState() });
   });
 
   // Reclaim a seat after a drop or page reload, proven by the secret token.
@@ -94,7 +96,7 @@ io.on('connection', (socket) => {
     ack?.(room.pokerAction(myPid(), type));
   });
 
-  // --- side bets (player-vs-player coin flips) ---
+  // --- Side Bets (player-vs-player coin flips) ---
   socket.on('sidebet:challenge', ({ targetId, amount }, ack) => {
     const room = myRoom();
     ack?.(room ? room.challengeSideBet(myPid(), targetId, amount) : { error: 'Not in a room.' });
@@ -106,6 +108,8 @@ io.on('connection', (socket) => {
 
   // --- gameplay input ---
   socket.on('input:move', (dir) => myRoom()?.handleInput(myPid(), dir));
+  socket.on('input:boost', () => myRoom()?.handleAction(myPid(), 'boost'));
+  socket.on('input:shoot', (target) => myRoom()?.handleAction(myPid(), 'shoot', target));
 
   // --- dropping (seat is held open for the grace period) ---
   socket.on('disconnect', () => {
@@ -114,5 +118,5 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`\n  Gamble Party running at  http://localhost:${PORT}\n`);
+  console.log(`\n  Potluck running at  http://localhost:${PORT}\n`);
 });

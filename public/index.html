@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Gamble Party</title>
+  <title>Potluck</title>
+  <!-- Poker-chip favicon (same art as the bankroll icon). -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Ccircle%20cx='12'%20cy='12'%20r='11'%20fill='%23d99836'%20stroke='%234b3826'%20stroke-width='1.5'/%3E%3Ccircle%20cx='12'%20cy='12'%20r='8.4'%20fill='none'%20stroke='%23fbf3e1'%20stroke-width='3'%20stroke-dasharray='3%203.1'/%3E%3Ccircle%20cx='12'%20cy='12'%20r='5'%20fill='%23a76a22'%20stroke='%234b3826'%20stroke-width='1'/%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Patrick+Hand&display=swap" rel="stylesheet" />
@@ -20,8 +22,12 @@
 
   <!-- Persistent wallet bar, shown once you're in a room. -->
   <div id="topbar" class="topbar hidden">
-    <span class="tb-name" id="tbName"></span>
-    <span class="tb-bankroll">💰 Bankroll: <strong id="tbBankroll">0</strong></span>
+    <div class="tb-left">
+      <span class="tb-name" id="tbName"></span>
+      <span class="tb-xp" id="tbXp"></span>
+    </div>
+    <span class="tb-code" id="tbCode"></span>
+    <span class="tb-bankroll"><span class="chip-icon"></span> Bankroll: <strong id="tbBankroll">0</strong></span>
   </div>
 
   <div id="app">
@@ -29,10 +35,10 @@
     <!-- JOIN -->
     <section id="screen-join" class="screen active">
       <div class="card">
-        <h1>🎲 Gamble Party</h1>
-        <p class="subtitle">Compete in minigames. Bet chips on who wins.</p>
+        <h1><span class="chip-icon"></span> Potluck</h1>
+        <p class="subtitle">Relax and lose it all.</p>
         <input id="nameInput" maxlength="16" placeholder="Your name" autocomplete="off" />
-        <button id="createBtn" class="primary">Create room</button>
+        <button id="createBtn" class="primary">Create Room</button>
         <div class="divider"><span>or</span></div>
         <div class="join-row">
           <input id="codeInput" maxlength="4" placeholder="CODE" class="code-input" autocomplete="off" />
@@ -46,8 +52,7 @@
     <section id="screen-lobby" class="screen">
       <div class="card">
         <h2>Lobby</h2>
-        <p>Room code: <span id="lobbyCode" class="code-badge"></span></p>
-        <p class="hint">Share the code so friends can join. Need at least <span id="minPlayers">2</span> players.</p>
+        <p class="hint">Share the room code so others can join. Need at least <span id="minPlayers">2</span> players.</p>
 
         <div id="modeControls" class="mode-controls">
           <div class="seg" id="modeSeg">
@@ -74,7 +79,6 @@
         <span class="bet-meta">Round <b id="betRound"></b> · <b id="betGameName"></b></span>
         <span class="bet-stakes" id="betStakes"></span>
       </div>
-      <p class="bet-tagline" id="betTagline"></p>
 
       <!-- The felt: pot in the center, players seated around it. -->
       <div class="felt" id="felt">
@@ -123,7 +127,7 @@
         <div id="gameScores" class="scoreboard"></div>
       </div>
       <canvas id="gameCanvas" width="900" height="560"></canvas>
-      <p class="hint">Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrow keys.</p>
+      <p class="hint" id="playHint"><kbd>WASD</kbd>/arrows move · <kbd>Space</kbd> lunge · <kbd>Click</kbd> shoot (slows them)</p>
     </section>
 
     <!-- RESULTS -->
@@ -159,19 +163,18 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <!-- Side bets: challenge another player to a coin flip from your bankroll. -->
+  <!-- Side Bets: challenge another player to a coin flip from your bankroll. -->
   <aside id="sideBets" class="sidebets hidden">
-    <div class="sidebets-title">🪙 Side bets</div>
+    <div class="sidebets-title">Side Bets</div>
     <ul id="sideBetList"></ul>
     <div id="sideBetForm" class="sidebet-form hidden">
-      <div class="sbf-label">Coin flip vs <b id="sbfName"></b></div>
       <div class="sbf-row">
         <input id="sbfAmount" type="number" min="1" placeholder="amount" />
         <button id="sbfFlip" class="pa primary">Flip!</button>
       </div>
       <div id="sbfError" class="error"></div>
     </div>
-    <p class="sidebets-hint">Tap a player, then wager. They flip to accept.</p>
+    <p class="sidebets-hint">Flip a coin, winner takes all.</p>
   </aside>
 
   <script src="/socket.io/socket.io.js"></script>

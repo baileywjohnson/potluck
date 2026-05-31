@@ -5,6 +5,9 @@ const socket = io();
 const me = { id: null, code: null };
 let state = null;          // latest authoritative room snapshot
 let lastTick = null;       // latest minigame frame during PLAYING
+let snapshots = [];        // recent {t, frame} buffer for smooth interpolation
+let rafId = null;          // requestAnimationFrame handle for the render loop
+const RENDER_DELAY = 70;   // ms rendered behind real time so we can interpolate
 
 // Felt table: keep seat/bet-chip elements keyed by player id so they update in
 // place (smooth transitions) instead of being rebuilt every frame.
@@ -12,7 +15,7 @@ const seatEls = new Map();
 const betEls = new Map();
 const prevAction = new Map(); // id -> last action seen, to pop the badge on change
 
-// Side bets.
+// Side Bets.
 const sideRowEls = new Map();    // pid -> side-bet list row element
 const seenIncoming = new Set();  // challenge ids we've already toasted
 let selectedSideTarget = null;   // who I'm about to challenge
@@ -24,7 +27,7 @@ const $ = (id) => document.getElementById(id);
 // after a network drop or a full page refresh. We use sessionStorage (not
 // localStorage) so it's scoped to THIS tab/window — that lets you open several
 // windows on one machine as different players without their sessions colliding.
-const SESSION_KEY = 'gambleparty.session';
+const SESSION_KEY = 'potluck.session';
 const store = window.sessionStorage;
 let session = loadSession();
 let hasLeft = false; // true after an explicit Leave, so stale states are ignored
@@ -57,11 +60,18 @@ function showScreen(name) {
 }
 
 // ---- join ------------------------------------------------------------------
+// On a successful create/join, render straight from the ack's state (me.id is
+// set first) so the UI — topbar included — appears immediately, even if the
+// next 'state' broadcast is a while off (e.g. joining mid-match as a spectator).
+function enterRoom(res, name) {
+  saveSession({ code: res.code, token: res.token, playerId: res.playerId, name });
+  if (res.state) { state = res.state; render(); }
+}
 $('createBtn').onclick = () => {
   hasLeft = false;
   const name = $('nameInput').value.trim();
   socket.emit('room:create', { name }, (res) => {
-    if (res.ok) saveSession({ code: res.code, token: res.token, playerId: res.playerId, name });
+    if (res.ok) enterRoom(res, name);
     else showJoinError(res.error);
   });
 };
@@ -71,7 +81,7 @@ $('joinBtn').onclick = () => {
   const code = $('codeInput').value.trim().toUpperCase();
   if (!code) return showJoinError('Enter a room code.');
   socket.emit('room:join', { code, name }, (res) => {
-    if (res.ok) saveSession({ code: res.code, token: res.token, playerId: res.playerId, name });
+    if (res.ok) enterRoom(res, name);
     else showJoinError(res.error);
   });
 };
@@ -108,15 +118,52 @@ $('modeHighBtn').onclick = () => socket.emit('room:setMode', { mode: 'high', buy
 $('buyInInput').onchange = () => socket.emit('room:setMode', { mode: 'high', buyIn: readBuyIn() });
 
 // ---- persistent wallet bar -------------------------------------------------
+// Click the room code to copy it to the clipboard.
+$('tbCode').title = 'Click to copy';
+$('tbCode').onclick = () => {
+  const code = state?.code;
+  if (!code) return;
+  const done = () => showToast(`📋 Copied room code ${code}`);
+  const fail = () => showToast('Could not copy the code');
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(code).then(done, () => fallbackCopy(code, done, fail));
+  } else {
+    fallbackCopy(code, done, fail);
+  }
+};
+function fallbackCopy(text, done, fail) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    done();
+  } catch { fail(); }
+}
+
 function updateTopbar() {
   const mp = myPlayer();
   if (state && mp) {
     $('topbar').classList.remove('hidden');
     $('tbName').textContent = mp.name + (mp.role === 'spectator' ? ' · spectating' : '');
+    const pct = mp.xpForLevel ? Math.round((mp.xpInLevel / mp.xpForLevel) * 100) : 0;
+    $('tbXp').innerHTML =
+      `<span class="lvl">Lv ${mp.level || 1}</span>` +
+      `<span class="xpbar" title="${mp.xpInLevel}/${mp.xpForLevel} XP"><span class="xpfill" style="width:${pct}%"></span></span>`;
+    $('tbCode').innerHTML = state.code ? `Room: <strong>${escape(state.code)}</strong>` : '';
     $('tbBankroll').textContent = mp.bankroll;
   } else {
     $('topbar').classList.add('hidden');
   }
+}
+
+// A compact "Lv N" badge used in the lobby + side-bet lists.
+function levelTag(p) {
+  return `<span class="lvl-tag">Lv ${p?.level || 1}</span>`;
 }
 
 // ---- betting (poker actions) -----------------------------------------------
@@ -129,12 +176,12 @@ document.querySelectorAll('#pokerActions [data-act]').forEach((btn) => {
   };
 });
 
-// ---- side bets -------------------------------------------------------------
+// ---- Side Bets -------------------------------------------------------------
 $('sbfFlip').onclick = () => {
   $('sbfError').textContent = '';
   if (!selectedSideTarget) return;
   const amount = parseInt($('sbfAmount').value, 10);
-  if (!amount || amount <= 0) return ($('sbfError').textContent = 'Enter an amount.');
+  if (!amount || amount <= 0) return ($('sbfError').textContent = 'Enter a valid amount.');
   socket.emit('sidebet:challenge', { targetId: selectedSideTarget, amount }, (res) => {
     if (res?.error) { $('sbfError').textContent = res.error; return; }
     $('sbfAmount').value = '';
@@ -164,7 +211,12 @@ socket.on('state', (s) => {
 
 socket.on('game:tick', (frame) => {
   lastTick = frame;
-  if (state?.phase === 'playing') drawGame();
+  if (state?.phase !== 'playing') return;
+  // Buffer snapshots; the rAF loop interpolates between them for smooth motion.
+  snapshots.push({ t: performance.now(), frame });
+  if (snapshots.length > 20) snapshots.shift();
+  updateGameHud(frame); // scores/timer update at the tick rate; motion is smoothed
+  detectEvents(frame);  // spawn pickup/hit/muzzle sparkles
 });
 
 // Socket.IO auto-reconnects. Whenever the transport (re)connects, if we hold
@@ -208,10 +260,10 @@ function render() {
   updateTopbar();
   showScreen(screenForPhase(state.phase));
 
-  // Side-bet panel rides along the whole match.
-  const inMatch = ['betting', 'countdown', 'playing', 'results'].includes(state.phase);
-  $('sideBets').classList.toggle('hidden', !inMatch);
-  if (inMatch) renderSideBets();
+  // Side-bet panel is available in the lobby and all the way through a match.
+  const sideOpen = ['lobby', 'betting', 'countdown', 'playing', 'results'].includes(state.phase);
+  $('sideBets').classList.toggle('hidden', !sideOpen);
+  if (sideOpen) renderSideBets();
   else { sideRowEls.clear(); $('sideBetList').innerHTML = ''; selectedSideTarget = null; }
 
   switch (state.phase) {
@@ -232,7 +284,6 @@ const myPlayer = () => state?.players.find((p) => p.id === me.id);
 
 // ---- lobby -----------------------------------------------------------------
 function renderLobby() {
-  $('lobbyCode').textContent = state.code;
   $('minPlayers').textContent = state.config.minPlayers;
   const isHost = me.id === state.hostId;
   const high = state.mode === 'high';
@@ -256,8 +307,8 @@ function renderLobby() {
     const away = p.connected ? '' : '<span class="away-tag">AWAY</span>';
     const broke = high && !canAfford(p) ? '<span class="out-tag">CAN\'T AFFORD</span>' : '';
     const you = p.id === me.id ? ' (you)' : '';
-    li.innerHTML = `<span><span style="color:${colorFor(p.id)}">●</span> ${escape(p.name)}${you}${host}${away}${broke}</span>
-      <span class="pchips">💰 ${p.bankroll}</span>`;
+    li.innerHTML = `<span><span style="color:${colorFor(p.id)}">●</span> ${escape(p.name)}${you} ${levelTag(p)}${host}${away}${broke}</span>
+      <span class="pchips"><span class="chip-icon"></span> ${p.bankroll}</span>`;
     list.appendChild(li);
   }
 
@@ -277,13 +328,9 @@ const ACTION_LABEL = { check: 'CHECK', call: 'CALL', bet: 'BET', raise: 'RAISE',
 
 function renderBetting() {
   const pk = state.poker;
-  const gameName = state.minigame?.name || 'the minigame';
   const proportional = state.minigame?.payout === 'proportional';
   $('betRound').textContent = `${state.round} / ${state.totalRounds}`;
   $('betGameName').textContent = state.minigame?.name || '';
-  $('betTagline').innerHTML = proportional
-    ? `Grab coins in <b>${escape(gameName)}</b> — your cut of the pot scales with how many you collect. Fold to sit out.`
-    : `Bet on yourself to win <b>${escape(gameName)}</b> — winner takes the whole pot. Fold to sit out.`;
   $('betStakes').textContent = state.mode === 'high'
     ? `High-stakes · ${state.buyIn} buy-in`
     : `Low-stakes · ${state.config.lowStipend} stake`;
@@ -336,6 +383,9 @@ function renderSeats(pk) {
 
   // Position seats around an ellipse, with "me" anchored at the bottom.
   const n = order.length;
+  // With exactly two players the top seat sits right above the pot, so nudge
+  // the pot down to clear it (3+ players fan out to the sides — no conflict).
+  $('felt').classList.toggle('duo', n === 2);
   let myIdx = order.indexOf(me.id);
   if (myIdx < 0) myIdx = 0;
 
@@ -441,7 +491,7 @@ function initials(name) {
   return ((parts[0]?.[0] || '') + (parts[1]?.[0] || parts[0]?.[1] || '')).toUpperCase();
 }
 
-// ---- side bets -------------------------------------------------------------
+// ---- Side Bets -------------------------------------------------------------
 function renderSideBets() {
   const list = $('sideBetList');
   const others = state.players.filter((p) => p.id !== me.id);
@@ -465,10 +515,14 @@ function renderSideBets() {
       row = document.createElement('li');
       row.className = 'sb-row';
       // The coin-slot is left untouched by updates so its flip animation survives re-renders.
+      // Layout mirrors a lobby row: [dot · name · Lv badge] on the left, the
+      // bankroll right-aligned. (Plus the coin-slot for flip animations and the
+      // accept/decline actions, which sit just left of the bankroll.)
       row.innerHTML = '<span class="sb-dot"></span><span class="sb-name"></span>'
-        + '<span class="sb-bank"></span>'
+        + '<span class="sb-lvl lvl-tag"></span>'
         + `<span class="coin-slot" data-pid="${p.id}"></span>`
-        + '<span class="sb-actions"></span>';
+        + '<span class="sb-actions"></span>'
+        + '<span class="sb-bank"></span>';
       sideRowEls.set(p.id, row);
       list.appendChild(row);
     }
@@ -477,7 +531,8 @@ function renderSideBets() {
 
     row.querySelector('.sb-dot').style.background = colorFor(p.id);
     row.querySelector('.sb-name').textContent = p.name;
-    row.querySelector('.sb-bank').textContent = '💰' + p.bankroll;
+    row.querySelector('.sb-lvl').textContent = 'Lv ' + (p.level || 1);
+    row.querySelector('.sb-bank').innerHTML = '<span class="chip-icon"></span> ' + p.bankroll;
     row.classList.toggle('away', !p.connected);
     row.classList.toggle('incoming', !!incoming);
     row.classList.toggle('selected', selectedSideTarget === p.id);
@@ -512,7 +567,6 @@ function renderSideBets() {
   const showForm = target && target.connected && !busy;
   if (selectedSideTarget && !showForm) selectedSideTarget = null;
   $('sideBetForm').classList.toggle('hidden', !showForm);
-  if (showForm) $('sbfName').textContent = target.name;
 }
 
 function respondSide(id, accept) {
@@ -569,18 +623,162 @@ function renderPlayingHud() {
   banner.classList.toggle('hidden', !(amSpectator || amFolded));
   banner.textContent = amFolded ? '🙅 You folded — watching for the pot.' : '👀 Spectating — watching the action live.';
   $('playPot').textContent = state.poker ? `POT ${state.poker.pot}` : '';
-  if (lastTick) drawGame();
+  startRenderLoop();
 }
 
 const canvas = $('gameCanvas');
 const ctx = canvas.getContext('2d');
 
-function drawGame() {
-  const f = lastTick;
-  if (!f) return;
-  canvas.width = f.arena.width;
-  canvas.height = f.arena.height;
+// ---- Coin Rush renderer ----------------------------------------------------
+// Sprites (background, coins, player balls) are pre-rendered once to offscreen
+// canvases and blitted each frame, so we get rich gradients/shadows cheaply.
+// We also render at the display's pixel density (supersampled) for crispness.
+let arenaW = 900, arenaH = 560;   // logical arena size (independent of pixels)
+let SS = 1;                       // supersample factor (≈ devicePixelRatio)
+let bgCanvas = null;              // pre-rendered arena floor
+let coinSprite = null;            // pre-rendered coin
+const ballSprites = new Map();    // color -> pre-rendered player ball
+let particles = [];               // transient sparkles (pickups, hits, trails)
+let lastFrameT = 0;
+const prevScore = new Map();      // detect coin pickups (score went up)
+const prevSlow = new Set();       // detect new hits (became slowed)
+const prevBulletIds = new Set();  // detect new shots (muzzle flash)
 
+function makeOffscreen(w, h) {
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h));
+  return c;
+}
+// Draw a sprite at supersampled resolution but addressed in logical units.
+function sprite(lw, lh, draw) {
+  const c = makeOffscreen(lw * SS, lh * SS);
+  const g = c.getContext('2d');
+  g.scale(SS, SS);
+  draw(g);
+  return c;
+}
+function lighten(hex, amt) {
+  const n = parseInt(String(hex).replace('#', ''), 16);
+  let r = (n >> 16) & 255, gr = (n >> 8) & 255, b = n & 255;
+  r = Math.round(r + (255 - r) * amt); gr = Math.round(gr + (255 - gr) * amt); b = Math.round(b + (255 - b) * amt);
+  return `rgb(${r},${gr},${b})`;
+}
+
+// Size the canvas to the arena (crisp for the display) and (re)build sprites.
+function ensureCanvas(w, h) {
+  const ss = Math.min(2, Math.max(1, Math.round(window.devicePixelRatio || 1)));
+  if (arenaW === w && arenaH === h && SS === ss && bgCanvas) return;
+  arenaW = w; arenaH = h; SS = ss;
+  canvas.width = w * SS; canvas.height = h * SS;
+  ctx.setTransform(SS, 0, 0, SS, 0, 0); // draw everything in logical coords
+  buildBackground(w, h);
+  buildCoinSprite();
+  ballSprites.clear();
+}
+
+function buildBackground(w, h) {
+  bgCanvas = sprite(w, h, (b) => {
+    const floor = b.createRadialGradient(w / 2, h * 0.42, 40, w / 2, h / 2, Math.max(w, h) * 0.72);
+    floor.addColorStop(0, '#3c5733'); floor.addColorStop(1, '#22381d');
+    b.fillStyle = floor; b.fillRect(0, 0, w, h);
+    b.strokeStyle = 'rgba(255,255,255,0.04)'; b.lineWidth = 1; b.beginPath();
+    for (let x = 45; x < w; x += 45) { b.moveTo(x, 0); b.lineTo(x, h); }
+    for (let y = 45; y < h; y += 45) { b.moveTo(0, y); b.lineTo(w, y); }
+    b.stroke();
+    const vig = b.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.32, w / 2, h / 2, Math.max(w, h) * 0.62);
+    vig.addColorStop(0, 'rgba(0,0,0,0)'); vig.addColorStop(1, 'rgba(0,0,0,0.42)');
+    b.fillStyle = vig; b.fillRect(0, 0, w, h);
+  });
+}
+
+const COIN_R = 11, COIN_PAD = 7;
+function buildCoinSprite() {
+  const size = (COIN_R + COIN_PAD) * 2;
+  coinSprite = sprite(size, size, (g) => {
+    const c = size / 2;
+    const grad = g.createRadialGradient(c - 3, c - 3, 1, c, c, COIN_R);
+    grad.addColorStop(0, '#fff3c0'); grad.addColorStop(0.55, '#ffcd3c'); grad.addColorStop(1, '#d28e1f');
+    g.beginPath(); g.arc(c, c, COIN_R, 0, Math.PI * 2); g.fillStyle = grad; g.fill();
+    g.lineWidth = 2; g.strokeStyle = '#a8690f'; g.stroke();
+    g.beginPath(); g.arc(c - 3.4, c - 3.6, 2.6, 0, Math.PI * 2); g.fillStyle = 'rgba(255,255,255,0.85)'; g.fill();
+  });
+  coinSprite._size = size;
+}
+
+const BALL_R = 18, BALL_PAD = 9;
+function ballSprite(color) {
+  let s = ballSprites.get(color);
+  if (s) return s;
+  const lw = (BALL_R + BALL_PAD) * 2, lh = lw + 5, cx = lw / 2, cy = BALL_PAD + BALL_R;
+  s = sprite(lw, lh, (g) => {
+    g.beginPath(); g.ellipse(cx, cy + BALL_R + 3, BALL_R * 0.85, BALL_R * 0.38, 0, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(0,0,0,0.28)'; g.fill();
+    const grad = g.createRadialGradient(cx - BALL_R * 0.35, cy - BALL_R * 0.4, BALL_R * 0.2, cx, cy, BALL_R);
+    grad.addColorStop(0, lighten(color, 0.55)); grad.addColorStop(1, color);
+    g.beginPath(); g.arc(cx, cy, BALL_R, 0, Math.PI * 2); g.fillStyle = grad; g.fill();
+    g.lineWidth = 2.5; g.strokeStyle = 'rgba(40,26,12,0.4)'; g.stroke();
+    g.beginPath(); g.arc(cx - BALL_R * 0.32, cy - BALL_R * 0.34, BALL_R * 0.28, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(255,255,255,0.5)'; g.fill();
+  });
+  s._cx = cx; s._cy = cy; s._lw = lw; s._lh = lh;
+  ballSprites.set(color, s);
+  return s;
+}
+
+function spawnBurst(x, y, color, count, o = {}) {
+  const speed = o.speed || 70, life = o.life || 0.5, size = o.size || 3, g = o.g ?? 140, lift = o.lift || 0;
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2, sp = speed * (0.35 + Math.random() * 0.85);
+    particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - lift, life, max: life, color, size, g });
+  }
+  if (particles.length > 320) particles.splice(0, particles.length - 320);
+}
+
+// Diff the newest snapshot to spawn pickup/hit/muzzle bursts.
+function detectEvents(f) {
+  for (const p of f.players) {
+    const prev = prevScore.get(p.id);
+    if (prev !== undefined && p.score > prev) spawnBurst(p.x, p.y, '#ffe08a', 9, { speed: 95, life: 0.5, lift: 25 });
+    prevScore.set(p.id, p.score);
+    if (p.slowed && !prevSlow.has(p.id)) spawnBurst(p.x, p.y, '#9fc6ff', 11, { speed: 80, life: 0.5 });
+    if (p.slowed) prevSlow.add(p.id); else prevSlow.delete(p.id);
+  }
+  const ids = new Set();
+  for (const b of (f.projectiles || [])) {
+    ids.add(b.id);
+    if (!prevBulletIds.has(b.id)) spawnBurst(b.x, b.y, '#ffd9d0', 6, { speed: 60, life: 0.22, size: 2.5, g: 0 });
+  }
+  prevBulletIds.clear(); ids.forEach((id) => prevBulletIds.add(id));
+}
+
+function drawParticles(dt) {
+  for (const p of particles) { p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += p.g * dt; }
+  particles = particles.filter((p) => p.life > 0);
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life / p.max);
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fillStyle = p.color; ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// Render the arena every animation frame (display refresh rate), interpolating
+// between buffered snapshots — decoupling smoothness from the network tick rate.
+function startRenderLoop() {
+  if (rafId) return;          // already running
+  snapshots.length = 0;       // fresh buffer for this minigame
+  particles = [];
+  prevScore.clear(); prevSlow.clear(); prevBulletIds.clear();
+  lastFrameT = 0;
+  rafId = requestAnimationFrame(renderLoop);
+}
+function renderLoop() {
+  if (state?.phase !== 'playing') { rafId = null; return; }
+  drawGame();
+  rafId = requestAnimationFrame(renderLoop);
+}
+
+// Scores + timer come straight from the latest snapshot (no need to smooth).
+function updateGameHud(f) {
   $('gameTimer').textContent = `${f.timeLeft}s`;
   const sb = $('gameScores');
   sb.innerHTML = '';
@@ -591,32 +789,101 @@ function drawGame() {
     d.textContent = `${p.name}: ${p.score}`;
     sb.appendChild(d);
   });
+}
 
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+function drawGame() {
+  // Find the two snapshots straddling our (slightly delayed) render time.
+  const renderT = performance.now() - RENDER_DELAY;
+  let s0 = null, s1 = null;
+  for (let i = snapshots.length - 1; i >= 0; i--) {
+    if (snapshots[i].t <= renderT) { s0 = snapshots[i]; s1 = snapshots[i + 1] || null; break; }
+  }
+  if (!s0) s0 = snapshots[snapshots.length - 1] || null; // not enough history yet
+  if (!s0) return;
 
-  // Coins.
-  for (const c of f.coins) {
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, 11, 0, Math.PI * 2);
-    ctx.fillStyle = '#ffcd3c';
-    ctx.fill();
-    ctx.strokeStyle = '#b8860b';
-    ctx.lineWidth = 2;
-    ctx.stroke();
+  const f0 = s0.frame;
+  const f1 = s1 ? s1.frame : null;
+  const span = f1 ? s1.t - s0.t : 0;
+  const alpha = span > 0 ? Math.min(1, Math.max(0, (renderT - s0.t) / span)) : 0;
+  drawFrame(f0, f1, alpha);
+}
+
+function drawFrame(f0, f1, alpha) {
+  ensureCanvas(f0.arena.width, f0.arena.height);
+  const now = performance.now();
+  const dt = lastFrameT ? Math.min(0.05, (now - lastFrameT) / 1000) : 0;
+  lastFrameT = now;
+
+  ctx.clearRect(0, 0, arenaW, arenaH);
+  ctx.drawImage(bgCanvas, 0, 0, arenaW, arenaH);
+
+  // Coins (latest positions, gentle bob).
+  const cs = coinSprite._size;
+  for (const c of (f1 || f0).coins) {
+    const bob = Math.sin(now / 320 + c.id * 1.7) * 2;
+    ctx.drawImage(coinSprite, c.x - cs / 2, c.y - cs / 2 + bob, cs, cs);
   }
 
-  // Players.
-  for (const p of f.players) {
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 18, 0, Math.PI * 2);
-    ctx.fillStyle = colorFor(p.id);
-    ctx.fill();
-    if (p.id === me.id) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke(); }
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 12px system-ui';
-    ctx.textAlign = 'center';
-    ctx.fillText(p.name, p.x, p.y - 24);
+  // Bullets: interpolate by id (smooth), drawn as glowing shots.
+  const prevBullets = new Map((f0.projectiles || []).map((b) => [b.id, b]));
+  for (const b of ((f1 || f0).projectiles || [])) {
+    const pb = prevBullets.get(b.id);
+    const bx = (f1 && pb) ? pb.x + (b.x - pb.x) * alpha : b.x;
+    const by = (f1 && pb) ? pb.y + (b.y - pb.y) * alpha : b.y;
+    ctx.beginPath(); ctx.arc(bx, by, 9, 0, Math.PI * 2); ctx.fillStyle = 'rgba(232,128,111,0.35)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(bx, by, 4.5, 0, Math.PI * 2); ctx.fillStyle = '#ffe2da'; ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = '#c2503c'; ctx.stroke();
   }
+
+  drawParticles(dt); // sparkles behind the players
+
+  // Players: glide between the two snapshots; sprite body + status rings + label.
+  const prevById = new Map(f0.players.map((p) => [p.id, p]));
+  for (const p of (f1 || f0).players) {
+    const prev = prevById.get(p.id) || p;
+    const x = f1 ? prev.x + (p.x - prev.x) * alpha : p.x;
+    const y = f1 ? prev.y + (p.y - prev.y) * alpha : p.y;
+    if (p.boosting) {
+      ctx.beginPath(); ctx.arc(x, y, 26, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(243,181,75,0.9)'; ctx.lineWidth = 5; ctx.stroke();
+      if (Math.random() < 0.7) particles.push({ x, y, vx: 0, vy: 0, life: 0.32, max: 0.32, color: colorFor(p.id), size: 7, g: 0 });
+    }
+    if (p.slowed) {
+      ctx.beginPath(); ctx.arc(x, y, 24, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(96,165,250,0.85)'; ctx.lineWidth = 4; ctx.stroke();
+    }
+    const s = ballSprite(colorFor(p.id));
+    ctx.drawImage(s, x - s._cx, y - s._cy, s._lw, s._lh);
+    if (p.id === me.id) {
+      ctx.beginPath(); ctx.arc(x, y, BALL_R + 1.5, 0, Math.PI * 2);
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.stroke();
+    }
+    ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center';
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.strokeText(p.name, x, y - 27);
+    ctx.fillStyle = '#fff'; ctx.fillText(p.name, x, y - 27);
+  }
+
+  // Local player's boost meter (bottom-left of the arena).
+  const meP = (f1 || f0).players.find((p) => p.id === me.id);
+  if (meP) drawBoostBar(meP.boostCd || 0, (f1 || f0).boostMax || 5);
+}
+
+function drawBoostBar(cd, max) {
+  const ready = cd <= 0;
+  const w = 152, h = 22, x = 14, y = arenaH - 14 - h, r = 11;
+  const pill = (ww) => {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, ww, h, r); else ctx.rect(x, y, ww, h);
+  };
+  pill(w); ctx.fillStyle = 'rgba(20,12,6,.45)'; ctx.fill();
+  const frac = ready ? 1 : Math.max(0, 1 - cd / max);
+  if (frac > 0) { pill(Math.max(h, w * frac)); ctx.fillStyle = ready ? '#86c98a' : '#f3b54b'; ctx.fill(); }
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 14px system-ui';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(ready ? '⚡ BOOST · Space' : `⚡ ${cd.toFixed(1)}s`, x + 12, y + h / 2 + 1);
+  ctx.textBaseline = 'alphabetic';
 }
 
 // ---- keyboard input (only matters during PLAYING) --------------------------
@@ -639,6 +906,28 @@ function onKey(e, down) {
 window.addEventListener('keydown', (e) => onKey(e, true));
 window.addEventListener('keyup', (e) => onKey(e, false));
 
+// Space = lunge. The server enforces the cooldown; we just send the press.
+window.addEventListener('keydown', (e) => {
+  if (e.code !== 'Space' || e.repeat) return; // ignore auto-repeat while held
+  const el = document.activeElement;
+  if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+  if (state?.phase !== 'playing') return;
+  e.preventDefault();
+  socket.emit('input:boost');
+});
+
+// Left click on the arena = shoot toward the cursor (slows whoever it hits).
+canvas.addEventListener('mousedown', (e) => {
+  if (e.button !== 0 || state?.phase !== 'playing') return;
+  const mp = myPlayer();
+  if (!mp || mp.role !== 'player' || state.poker?.folded.includes(me.id)) return; // contenders only
+  e.preventDefault();
+  // Convert click (display px) into logical arena coordinates.
+  const ax = e.offsetX * (arenaW / canvas.clientWidth);
+  const ay = e.offsetY * (arenaH / canvas.clientHeight);
+  socket.emit('input:shoot', { x: ax, y: ay });
+});
+
 // Send the current movement direction at the simulation rate.
 setInterval(() => {
   if (state?.phase !== 'playing') return;
@@ -647,7 +936,7 @@ setInterval(() => {
     y: (keys.down ? 1 : 0) - (keys.up ? 1 : 0),
   };
   socket.emit('input:move', dir);
-}, 1000 / 20);
+}, 1000 / 30);
 
 // ---- results ---------------------------------------------------------------
 function renderResults() {
@@ -705,7 +994,7 @@ function renderGameOver() {
     const sign = p.net > 0 ? '+' : '';
     li.innerHTML = `<span><span class="rank">${medal || i + 1}</span>
       <span style="color:${colorFor(p.id)}">${escape(p.name)}</span> · ${p.wins} wins</span>
-      <span>💰 ${p.bankroll} <span class="${cls}">(${sign}${p.net})</span></span>`;
+      <span><span class="chip-icon"></span> ${p.bankroll} <span class="${cls}">(${sign}${p.net})</span></span>`;
     list.appendChild(li);
   });
 
@@ -714,7 +1003,7 @@ function renderGameOver() {
     const li = document.createElement('li');
     li.innerHTML = `<span><span class="rank">—</span>
       <span style="color:${colorFor(s.id)}">${escape(s.name)}</span> <span class="spec-tag">SPECTATED</span></span>
-      <span>💰 ${s.bankroll}</span>`;
+      <span><span class="chip-icon"></span> ${s.bankroll}</span>`;
     list.appendChild(li);
   }
 

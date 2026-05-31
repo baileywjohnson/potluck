@@ -1,5 +1,5 @@
 /* ===========================================================================
-   Gamble Party — "warm parchment sketchbook" theme.
+   Potluck — "warm parchment sketchbook" theme.
    Hand-drawn fonts, paper background, sketchy ink-outlined shapes, and chunky
    board-game pieces with paper-cutout shadows.
    =========================================================================== */
@@ -147,8 +147,6 @@ button.ghost { background: transparent; }
 .bet-head { width: 100%; display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 1rem; }
 .bet-head b { color: var(--ink); }
 .bet-stakes { color: var(--accent-ink); font-weight: 700; }
-.bet-tagline { color: var(--muted); font-size: 1rem; margin: 4px 0 8px; text-align: center; }
-.bet-tagline b { color: var(--ink); }
 
 .felt {
   /* Fit within both the available height and width without distorting.
@@ -168,6 +166,8 @@ button.ghost { background: transparent; }
 
 /* Center pot — a round paper token. */
 .felt-center { position: absolute; left: 50%; top: 42%; transform: translate(-50%,-50%); text-align: center; pointer-events: none; }
+/* Two-player tables: drop the pot to center so the top seat doesn't cover it. */
+.felt.duo .felt-center { top: 50%; }
 .pot-chip {
   position: relative; display: flex; align-items: center; justify-content: center;
   width: 92px; height: 92px; margin: 0 auto;
@@ -176,7 +176,9 @@ button.ghost { background: transparent; }
 }
 /* "POT" floats near the top; the number is centered on its own in the circle. */
 .pot-label { position: absolute; top: 15px; left: 0; right: 0; text-align: center; font-size: .58rem; letter-spacing: .25em; color: var(--muted); }
-.pot-chip strong { font-family: 'Caveat', cursive; font-size: 2.4rem; color: var(--accent-ink); line-height: 1; transform: translateX(-10px); }
+/* Patrick Hand (upright, balanced numerals) centers far better than the
+   cursive Caveat, whose digits have uneven side-bearing. */
+.pot-chip strong { font-family: 'Patrick Hand', cursive; font-weight: 700; font-size: 2.5rem; color: var(--accent-ink); line-height: 1; width: 100%; text-align: center; }
 .felt-sub { margin-top: 8px; font-size: .9rem; color: #2f4a24; min-height: 1em; }
 
 /* Seats — the box is just the avatar; labels are positioned outward from it. */
@@ -270,7 +272,11 @@ button.ghost { background: transparent; }
 
 /* Playing — HUD and canvas share one width so their edges line up exactly.
    (900x560 is the Coin Rush arena aspect ratio.) */
-#screen-playing { --stage: min(900px, 96vw, calc(62vh * 900 / 560)); }
+/* Cap the stage to the height left over after the HUD, hint, and page padding,
+   so the playing view always fits the viewport (no scroll) while the HUD and
+   canvas stay the same width. 200px reserves room for that chrome. */
+#screen-playing { --stage: min(900px, 96vw, calc((100dvh - 200px) * 900 / 560)); }
+#screen-playing.active { overflow: hidden; } /* never show a scrollbar here */
 .game-hud { width: var(--stage); display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
 .scoreboard { display: flex; gap: 10px; flex-wrap: wrap; }
 .scoreboard .sb { padding: 4px 12px; border: 2px solid var(--ink); border-radius: var(--sketch-pill); background: var(--paper); font-weight: 700; }
@@ -279,6 +285,8 @@ button.ghost { background: transparent; }
   background: #2c3f24; border: 3px solid var(--ink); border-radius: 16px; box-shadow: 6px 8px 0 var(--shadow);
 }
 kbd { background: var(--paper); border: 2px solid var(--ink); border-radius: 6px; padding: 0 7px; margin: 0 1px; font-size: .85em; }
+/* Push the hint down 5px with margin (in-flow), so it isn't clipped/overflowing. */
+#playHint { margin: calc(1em + 5px) 0 0; }
 
 /* Results */
 .winner-line { font-family: 'Caveat', cursive; font-size: 1.9rem; color: var(--ink); }
@@ -299,8 +307,25 @@ kbd { background: var(--paper); border: 2px solid var(--ink); border-radius: 6px
   padding: 9px 18px; background: rgba(251,243,225,.95); border-bottom: 3px solid var(--ink);
   font-size: 1.05rem; color: var(--ink);
 }
-.tb-name { color: var(--muted); }
+.tb-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.tb-name { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tb-bankroll strong { color: var(--accent-ink); }
+/* A little poker-chip icon (used wherever a bankroll is shown). */
+.chip-icon {
+  display: inline-block; width: 1.05em; height: 1.05em; vertical-align: -0.18em;
+  background: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Ccircle%20cx='12'%20cy='12'%20r='11'%20fill='%23d99836'%20stroke='%234b3826'%20stroke-width='1.5'/%3E%3Ccircle%20cx='12'%20cy='12'%20r='8.4'%20fill='none'%20stroke='%23fbf3e1'%20stroke-width='3'%20stroke-dasharray='3%203.1'/%3E%3Ccircle%20cx='12'%20cy='12'%20r='5'%20fill='%23a76a22'%20stroke='%234b3826'%20stroke-width='1'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+/* Level + XP bar (left of the name). */
+.tb-xp { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; }
+.tb-xp .lvl { font-weight: 700; color: var(--accent-ink); font-size: .95rem; white-space: nowrap; }
+.xpbar { width: 110px; height: 11px; background: var(--paper2); border: 2px solid var(--ink); border-radius: 999px; overflow: hidden; }
+.xpfill { display: block; height: 100%; background: var(--accent); transition: width .4s ease; }
+/* "Lv N" badge reused in the lobby + side-bet lists — matches .host-tag. */
+.lvl-tag { font-size: .72rem; color: var(--accent-ink); border: 2px solid var(--accent-ink); padding: 1px 7px; border-radius: var(--sketch-pill); margin-left: 8px; white-space: nowrap; }
+/* Centered absolutely so it stays put regardless of the side widths. */
+.tb-code { position: absolute; left: 50%; transform: translateX(-50%); color: var(--muted); cursor: pointer; user-select: none; }
+.tb-code:hover strong { filter: brightness(1.15); text-decoration: underline; }
+.tb-code strong { color: var(--accent-ink); letter-spacing: .18em; }
 
 /* Lobby stakes controls */
 .mode-controls { margin: 14px 0 6px; }
@@ -345,13 +370,19 @@ kbd { background: var(--paper); border: 2px solid var(--ink); border-radius: 6px
   position: fixed; top: 60px; left: 50%; transform: translateX(-50%); z-index: 60;
   background: var(--paper); border: 2.5px solid var(--ink); border-radius: var(--sketch);
   box-shadow: 4px 5px 0 var(--shadow); padding: 10px 18px; font-weight: 700; color: var(--ink);
-  max-width: 90vw; text-align: center; animation: badgePop .3s ease;
+  max-width: 90vw; text-align: center; animation: toastPop .3s ease;
+}
+/* Keep the centering translate while it pops, so it doesn't drift right first. */
+@keyframes toastPop {
+  0%   { transform: translateX(-50%) scale(.6); }
+  60%  { transform: translateX(-50%) scale(1.12); }
+  100% { transform: translateX(-50%) scale(1); }
 }
 .toast.win { border-color: #3f7a30; }
 .toast.lose { border-color: var(--danger); }
 .toast.hidden { display: none; }
 
-/* ===== Side bets panel ===== */
+/* ===== Side Bets panel ===== */
 .sidebets {
   position: fixed; top: 64px; left: 12px; z-index: 35; width: 220px;
   background: var(--paper); border: 2.5px solid var(--ink); border-radius: var(--sketch-card);
@@ -371,9 +402,11 @@ kbd { background: var(--paper); border: 2px solid var(--ink); border-radius: 6px
 .sb-row.incoming { border-color: var(--accent-ink); background: #fff5df; cursor: default; animation: nudge 1s ease-in-out infinite; }
 @keyframes nudge { 0%,100% { transform: translateX(0);} 50% { transform: translateX(-2px);} }
 .sb-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--ink); flex: 0 0 auto; }
-.sb-name { font-weight: 700; font-size: .92rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-name { font-weight: 700; font-size: .92rem; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-lvl { flex: 0 0 auto; }
+.sb-row .lvl-tag { margin-left: 0; } /* row gap handles spacing here */
+.sb-actions { display: flex; gap: 4px; margin-left: auto; } /* pushes itself + the bankroll to the right */
 .sb-bank { font-size: .76rem; color: var(--muted); white-space: nowrap; }
-.sb-actions { display: flex; gap: 4px; }
 .sb-mini { padding: 3px 8px; font-size: .78rem; min-width: 0; border-width: 2px; box-shadow: 1px 1px 0 var(--shadow); }
 .sb-mini.yes { background: var(--accent2); color: #1f3d18; }
 .sb-mini.no { background: var(--danger); color: #fff4ef; }
@@ -391,8 +424,6 @@ kbd { background: var(--paper); border: 2px solid var(--ink); border-radius: 6px
 .coin-result.lose { color: var(--danger); }
 
 .sidebet-form { margin-top: 8px; padding-top: 8px; border-top: 2px dashed var(--line); }
-.sbf-label { font-size: .85rem; color: var(--muted); margin-bottom: 4px; text-align: center; }
-.sbf-label b { color: var(--ink); }
 .sbf-row { display: flex; flex-direction: column; gap: 6px; }
 .sbf-row input { margin: 0; width: 100%; padding: 9px 12px; text-align: center; font-size: 1rem; }
 /* Drop the number spinners so the digits aren't crowded. */

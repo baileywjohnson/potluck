@@ -1,4 +1,4 @@
-# 🎲 Gamble Party
+# 🪙 Potluck
 
 A multiplayer browser party game: players join a room, **bet play-money chips** on
 who they think will win the upcoming minigame, then compete. Winning bettors split
@@ -14,7 +14,7 @@ npm start
 # open http://localhost:3000 in a few browser tabs/devices
 ```
 
-One player clicks **Create room** and shares the 4-letter code; others **Join**.
+One player clicks **Create Room** and shares the 4-letter code; others **Join**.
 The host starts the match. Open multiple tabs to play solo against yourself.
 
 ## The game loop
@@ -43,6 +43,20 @@ matches. Each lobby is one of two stakes modes, chosen by the host:
 Mechanically the two modes are the same — one stake per match that you have to
 make last — the only difference is where the stake comes from (the house vs. your
 bankroll) and whether affordability can keep you out.
+
+### Levels & XP
+
+Every player earns **XP** for each minigame they play (a base amount + a bit per
+point scored + a bonus for winning). XP is persistent (like your bankroll) and
+drives your **level** — each level costs a little more than the last. Your level
+and an XP bar show in the wallet bar; levels also appear in the lobby and the
+side-bets panel.
+
+### Side bets
+
+Any two players can wager a **coin flip** from their bankrolls at any time (lobby
+or mid-match) via the side-bets panel — challenge someone, they accept, the coin
+decides. Independent of the poker pot.
 
 Either way, at match end every participant's **leftover chips are banked** into
 their bankroll, and the final standings show each player's net result. So
@@ -90,7 +104,10 @@ lobby if too few players remain).
 ### Minigame: Coin Rush
 
 Steer your avatar (WASD / arrow keys) around an arena and grab the most coins in
-20 seconds. Fully server-simulated — clients only send a movement direction.
+20 seconds. Tap **Space** to lunge forward (≈5s cooldown), and **left-click** to
+fire a shot that briefly **slows** whoever it hits. Fully server-simulated — clients
+send a movement direction, a boost press, and an aim point; the browser renders at
+the display's refresh rate, interpolating between snapshots for smooth motion.
 
 ## Architecture
 

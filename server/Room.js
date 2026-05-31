@@ -386,7 +386,7 @@ export class Room {
 
     amount = Math.floor(Number(amount));
     if (!Number.isFinite(amount) || amount <= 0) return { error: 'Enter a positive amount.' };
-    if (from.bankroll < amount) return { error: "That's more than your bankroll." };
+    if (from.bankroll < amount) return { error: "That's more than your stash." };
     if (to.bankroll < amount) return { error: `${to.name} can't cover that.` };
 
     // Only one outstanding challenge per direction.

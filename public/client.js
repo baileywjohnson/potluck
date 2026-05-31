@@ -296,7 +296,7 @@ function renderLobby() {
   if (document.activeElement !== $('buyInInput')) $('buyInInput').value = state.buyIn;
   for (const el of [$('modeLowBtn'), $('modeHighBtn'), $('buyInInput')]) el.disabled = !isHost;
   $('modeSummary').textContent = high
-    ? `High-stakes: each player pays ${state.buyIn} from their bankroll. Bust to 0 and you're eliminated to spectator for the rest of the match.`
+    ? `High-stakes: each player pays ${state.buyIn} from their stash. Bust to 0 and you're eliminated to spectator for the rest of the match.`
     : `Low-stakes: the house stakes everyone ${state.config.lowStipend} free chips to start the match. Make it last — bust to 0 and you spectate until the next match.`;
 
   const list = $('lobbyPlayers');

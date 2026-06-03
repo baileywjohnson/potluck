@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { CONFIG } from './config.js';
 import { PokerRound } from './poker.js';
 import { minigameForRound } from './minigames/index.js';
+import { saveProgress } from './auth.js';
 
 // Phases of a match. The room walks through:
 //   LOBBY -> (BETTING -> COUNTDOWN -> PLAYING -> RESULTS)*N -> GAMEOVER -> LOBBY
@@ -80,13 +81,17 @@ export class Room {
     this._turnTimer = null;        // per-turn betting clock
     this.graceTimers = new Map();  // playerId -> timeout holding a seat open
     this.sideBets = new Map();     // challengeId -> { id, fromId, toId, amount } (pending coin-flip wagers)
+    this.chat = [];                // recent chat messages (capped) — shared by everyone in the room
   }
 
   // ---- player lifecycle ----------------------------------------------------
 
   // A player's identity (id + secret token) is stable and survives socket
   // reconnects; `socketId` is just the current transport and may change.
-  addPlayer(socket, name) {
+  // `account` (optional) is a logged-in user's saved row; when present the
+  // player's progress is seeded from — and later written back to — their
+  // account. Guests pass null and keep the old ephemeral behaviour.
+  addPlayer(socket, name, account = null) {
     const id = randomUUID();
     const token = randomUUID();
     // Joining once a match is underway means you watch this one and play the
@@ -96,14 +101,16 @@ export class Room {
       id,
       token,
       socketId: socket.id,
-      name: (name || 'Player').slice(0, 16),
-      bankroll: CONFIG.STARTING_BANKROLL, // persistent wallet, kept between matches
-      xp: 0,                              // persistent experience (earned per minigame)
+      userId: account?.id || null,        // links the seat to a saved account (null = guest)
+      name: account ? account.username : (name || 'Player').slice(0, 16),
+      bankroll: account ? account.bankroll : CONFIG.STARTING_BANKROLL, // persistent wallet
+      xp: account ? account.xp : 0,       // persistent experience (earned per minigame)
+      lifetimeWins: account ? account.wins : 0, // persistent win count (distinct from per-match wins)
       chips: 0,                           // per-match stake, assigned at match start
       role,                               // 'player' (in the match) | 'spectator'
       eliminated: false,                  // busted out of the current match
       connected: true,
-      wins: 0,
+      wins: 0,                            // minigames won this match (reset each match)
     };
     this.players.set(id, player);
     if (!this.hostId) this.hostId = id;
@@ -253,6 +260,7 @@ export class Room {
         p.chips = 0;
       }
     }
+    this.persistAll(); // high-stakes buy-ins moved money out of wallets — save it
 
     // Scale the ante and bet increment to the per-match stake so the betting
     // feels the same in low- and high-stakes.
@@ -419,6 +427,7 @@ export class Room {
     const loser = fromWins ? to : from;
     loser.bankroll -= sb.amount;
     winner.bankroll += sb.amount;
+    this.persist(from); this.persist(to); // wallets changed — save both
 
     // Broadcast the flip so everyone watches it resolve.
     this.io.to(this.code).emit('sidebet:flip', {
@@ -466,16 +475,22 @@ export class Room {
   }
 
   handleInput(playerId, input) {
+    // Movement is optional — some minigames (e.g. Type Race) don't use it.
     if (this.phase === Phase.PLAYING && this.game) {
-      this.game.handleInput(playerId, input);
+      this.game.handleInput?.(playerId, input);
     }
   }
 
-  // Discrete actions (Space to lunge, left click to shoot). Optional per minigame.
+  // Discrete actions (Space to lunge, left click to shoot, typing). Optional per minigame.
   handleAction(playerId, action, data) {
     if (this.phase !== Phase.PLAYING || !this.game) return;
     if (action === 'boost') this.game.boost?.(playerId);
     else if (action === 'shoot') this.game.shoot?.(playerId, data);
+    else if (action === 'type') this.game.handleType?.(playerId, data);
+    else if (action === 'aim') this.game.aim?.(playerId, data);
+    else if (action === 'drop') this.game.drop?.(playerId);
+    else if (action === 'place') this.game.place?.(playerId, data);
+    else if (action === 'turn') this.game.turn?.(playerId, data);
   }
 
   endPlaying() {
@@ -490,17 +505,22 @@ export class Room {
       const p = this.players.get(id);
       if (p) p.chips += amount;
     }
-    const winner = result.winnerId ? this.players.get(result.winnerId) : null;
-    if (winner) winner.wins += 1; // the top scorer still earns the "win"
+    // A minigame may have several co-winners (e.g. Trapdoor survivors split).
+    const winnerIds = (result.winners && result.winners.length)
+      ? result.winners : (result.winnerId ? [result.winnerId] : []);
+    const winnerSet = new Set(winnerIds);
+    for (const id of winnerIds) { const w = this.players.get(id); if (w) { w.wins += 1; w.lifetimeWins += 1; } }
 
     // Award XP: everyone who played the minigame earns it (base + score + win bonus).
     for (const s of result.scores) {
       this.awardXp(s.id, CONFIG.XP_BASE
         + Math.min(CONFIG.XP_SCORE_CAP, Math.max(0, s.score) * CONFIG.XP_PER_SCORE)
-        + (s.id === result.winnerId ? CONFIG.XP_WIN : 0));
+        + (winnerSet.has(s.id) ? CONFIG.XP_WIN : 0));
     }
 
-    this.lastResult = this.buildResult({ winnerId: result.winnerId, scores: result.scores, payouts });
+    this.persistAll(); // XP + lifetime wins changed this round
+
+    this.lastResult = this.buildResult({ winnerId: result.winnerId, winners: winnerIds, scores: result.scores, payouts });
     this.poker = null;
     this.setPhase(Phase.RESULTS, CONFIG.RESULTS_MS, () => this.beginBetting());
   }
@@ -525,12 +545,19 @@ export class Room {
       const items = scores.map((s) => ({ id: s.id, w: totalScore > 0 ? Math.max(0, s.score) : 1 }));
       return splitByWeights(items, pot);
     }
+    if (mode === 'split') {
+      // Split the pot evenly among the winners (one survivor, the finalists, or
+      // — if everyone dropped together — the last group). Exact integer split.
+      const ws = (result.winners && result.winners.length)
+        ? result.winners : (result.winnerId ? [result.winnerId] : []);
+      return ws.length ? splitByWeights(ws.map((id) => ({ id, w: 1 })), pot) : {};
+    }
     return result.winnerId ? { [result.winnerId]: pot } : {};
   }
 
   // Summarize the round for the results screen. Reads pot/contributions from the
   // (still-live) poker round, so call this before clearing `this.poker`.
-  buildResult({ winnerId, scores, uncontested = false, payouts = {} }) {
+  buildResult({ winnerId, winners = [], scores, uncontested = false, payouts = {} }) {
     const pot = this.poker.pot;
     const contributed = this.poker.contributed;
     const folded = new Set(this.poker.folded);
@@ -551,6 +578,8 @@ export class Room {
       minigame: { id: this.minigame.id, name: this.minigame.name, payout: this.minigame.payout || 'winner' },
       winnerId,
       winnerName: winnerId ? this.players.get(winnerId)?.name ?? null : null,
+      // Names of everyone splitting the pot (for "A & B split…" on the results screen).
+      winnerNames: winners.map((id) => this.players.get(id)?.name).filter(Boolean),
       uncontested,
       pot,
       scores,
@@ -574,6 +603,8 @@ export class Room {
         wins: p.wins, net: banked - cost,
       };
     });
+    this.persistAll(); // leftover chips were banked back into wallets
+
     // Match ranking: most chips banked wins.
     standings.sort((a, b) => b.banked - a.banked);
 
@@ -616,6 +647,31 @@ export class Room {
     this.broadcast();
   }
 
+  // ---- chat ---------------------------------------------------------------
+
+  // Anyone in the room can post; messages fan out to everyone over 'chat:msg'.
+  postChat(playerId, text) {
+    const player = this.players.get(playerId);
+    if (!player) return;
+    const clean = String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 280);
+    if (!clean) return;
+    const msg = { playerId, name: player.name, text: clean, ts: Date.now() };
+    this.chat.push(msg);
+    if (this.chat.length > 80) this.chat.shift(); // keep only recent backlog
+    this.io.to(this.code).emit('chat:msg', msg);
+  }
+
+  // Recent backlog, handed to a socket as it joins/reconnects.
+  chatHistory() { return this.chat; }
+
+  // ---- account persistence ------------------------------------------------
+
+  // Write a logged-in player's progress back to their account. No-op for guests.
+  persist(player) {
+    if (player?.userId) saveProgress(player.userId, { bankroll: player.bankroll, xp: player.xp, wins: player.lifetimeWins });
+  }
+  persistAll() { for (const p of this.players.values()) this.persist(p); }
+
   // ---- phase + broadcast plumbing -----------------------------------------
 
   setPhase(phase, durationMs, onTimeout) {
@@ -648,6 +704,7 @@ export class Room {
       players: [...this.players.values()].map((p) => ({
         id: p.id, name: p.name, bankroll: p.bankroll, chips: p.chips,
         role: p.role, eliminated: p.eliminated, wins: p.wins, connected: p.connected,
+        authed: !!p.userId, // logged-in (progress saved) vs guest
         xp: p.xp || 0, ...levelInfo(p.xp), // level, xpInLevel, xpForLevel
       })),
       // Live betting-round state (pot, whose turn, commitments) when present.

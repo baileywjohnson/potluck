@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import { Server } from 'socket.io';
 import { Room, makeRoomCode } from './Room.js';
+import * as auth from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -33,15 +34,67 @@ function bind(socket, code, playerId) {
   socket.data.playerId = playerId;
 }
 
+// A logged-in account may occupy only ONE room at a time. Find its current seat
+// (if any) across all rooms. Guests (no userId) are unconstrained — they have no
+// identity that spans tabs.
+function findAccountSeat(userId) {
+  for (const room of rooms.values()) {
+    for (const player of room.players.values()) {
+      if (player.userId && player.userId === userId) return { room, player };
+    }
+  }
+  return null;
+}
+
+// Guard for create/join. Returns an error string if the account is *actively*
+// (still connected) in another room. A merely disconnected old seat — e.g. they
+// closed the tab — is freed so they aren't locked out of starting fresh.
+function accountRoomBlock(userId) {
+  if (!userId) return null;
+  const seat = findAccountSeat(userId);
+  if (!seat) return null;
+  if (seat.player.connected) return `You're already in room ${seat.room.code}. Leave it there first.`;
+  seat.room.removePlayer(seat.player.id); // reclaim the stale seat from a dropped session
+  return null;
+}
+
 io.on('connection', (socket) => {
   const myRoom = () => rooms.get(socket.data.roomCode);
   const myPid = () => socket.data.playerId;
+  // The account (if any) currently authenticated on THIS socket.
+  const myAccount = () => (socket.data.userId ? auth.loadAccount(socket.data.userId) : null);
+
+  // --- accounts (optional; guests skip all of this) ---
+  socket.on('auth:signup', ({ name, password } = {}, ack) => {
+    const res = auth.signup(name, password);
+    if (res.ok) { socket.data.userId = res.user.id; socket.data.authToken = res.token; }
+    ack?.(res);
+  });
+  socket.on('auth:login', ({ name, password } = {}, ack) => {
+    const res = auth.login(name, password);
+    if (res.ok) { socket.data.userId = res.user.id; socket.data.authToken = res.token; }
+    ack?.(res);
+  });
+  socket.on('auth:resume', ({ token } = {}, ack) => {
+    const res = auth.resume(token);
+    if (res.ok) { socket.data.userId = res.user.id; socket.data.authToken = token; }
+    ack?.(res);
+  });
+  socket.on('auth:logout', (ack) => {
+    if (socket.data.authToken) auth.logout(socket.data.authToken);
+    socket.data.userId = null; socket.data.authToken = null;
+    ack?.({ ok: true });
+  });
 
   // --- joining ---
   socket.on('room:create', ({ name }, ack) => {
+    const account = myAccount();
+    const blocked = accountRoomBlock(account?.id);
+    if (blocked) return ack?.({ ok: false, error: blocked });
     const room = createRoom();
-    const player = room.addPlayer(socket, name);
+    const player = room.addPlayer(socket, name, account);
     bind(socket, room.code, player.id);
+    socket.emit('chat:history', room.chatHistory());
     // The token is the player's private reconnect key — only ever sent here.
     // Return the state too so the client renders immediately (not just on the
     // next broadcast — which may not arrive for a while mid-match).
@@ -50,12 +103,18 @@ io.on('connection', (socket) => {
 
   socket.on('room:join', ({ code, name }, ack) => {
     code = (code || '').toUpperCase().trim();
+    // Resolve the account + one-room guard first, so freeing any stale seat
+    // can't leave us holding a reference to a room that just got cleaned up.
+    const account = myAccount();
+    const blocked = accountRoomBlock(account?.id);
+    if (blocked) return ack?.({ ok: false, error: blocked });
     const room = rooms.get(code);
     if (!room) return ack?.({ ok: false, error: 'Room not found.' });
     if (room.players.size >= 8) return ack?.({ ok: false, error: 'Room is full.' });
     // Joining mid-match is allowed — you spectate this match and play the next.
-    const player = room.addPlayer(socket, name);
+    const player = room.addPlayer(socket, name, account);
     bind(socket, room.code, player.id);
+    socket.emit('chat:history', room.chatHistory());
     ack?.({ ok: true, code: room.code, playerId: player.id, token: player.token, state: room.getPublicState() });
   });
 
@@ -67,6 +126,7 @@ io.on('connection', (socket) => {
     const res = room.rejoin(token, socket);
     if (res.error) return ack?.({ ok: false, error: res.error });
     bind(socket, code, res.playerId);
+    socket.emit('chat:history', room.chatHistory());
     ack?.({ ok: true, code, playerId: res.playerId, state: room.getPublicState() });
   });
 
@@ -110,6 +170,14 @@ io.on('connection', (socket) => {
   socket.on('input:move', (dir) => myRoom()?.handleInput(myPid(), dir));
   socket.on('input:boost', () => myRoom()?.handleAction(myPid(), 'boost'));
   socket.on('input:shoot', (target) => myRoom()?.handleAction(myPid(), 'shoot', target));
+  socket.on('input:type', (text) => myRoom()?.handleAction(myPid(), 'type', text));
+  socket.on('input:aim', (x) => myRoom()?.handleAction(myPid(), 'aim', x));
+  socket.on('input:drop', () => myRoom()?.handleAction(myPid(), 'drop'));
+  socket.on('input:place', (idx) => myRoom()?.handleAction(myPid(), 'place', idx));
+  socket.on('input:turn', (dir) => myRoom()?.handleAction(myPid(), 'turn', dir));
+
+  // --- chat ---
+  socket.on('chat:send', (text) => myRoom()?.postChat(myPid(), text));
 
   // --- dropping (seat is held open for the grace period) ---
   socket.on('disconnect', () => {

@@ -1,11 +1,14 @@
 // Minigame registry. Add new minigames here and the rotation will pick
-// them up. Each entry must expose: { id, name, blurb, create(players) }.
+// them up. Each entry must expose: { id, name, blurb, payout, create(players) }.
 import { coinRush } from './coinRush.js';
+import { typeRace } from './typeRace.js';
+import { suika } from './suika.js';
+import { trapdoor } from './trapdoor.js';
+import { lightcycle } from './lightcycle.js';
 
-export const MINIGAMES = [coinRush];
+export const MINIGAMES = [coinRush, typeRace, suika, trapdoor, lightcycle];
 
-// Pick the minigame for a given round. For the vertical slice we cycle
-// through the registry; with one game that's always Coin Rush.
+// Pick the minigame for a given round — cycles through the registry.
 export function minigameForRound(roundIndex) {
   return MINIGAMES[roundIndex % MINIGAMES.length];
 }

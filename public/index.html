@@ -37,6 +37,27 @@
       <div class="card">
         <h1><span class="chip-icon"></span> Potluck</h1>
         <p class="subtitle">Relax and lose it all.</p>
+
+        <!-- Account (optional): log in to save your Stash, level and wins. -->
+        <div id="authBox" class="auth-box">
+          <div id="authForm">
+            <div class="auth-fields">
+              <input id="authUser" maxlength="16" placeholder="Username" autocomplete="username" />
+              <input id="authPass" type="password" placeholder="Password" autocomplete="current-password" />
+            </div>
+            <div class="auth-btns">
+              <button id="loginBtn">Log in</button>
+              <button id="signupBtn" class="primary">Sign up</button>
+            </div>
+            <p id="authError" class="error"></p>
+            <p class="auth-or hint">or continue below play as a guest (progress won’t be saved)</p>
+          </div>
+          <div id="authStatus" class="auth-status hidden">
+            <span class="auth-who">👤 Signed in as <strong id="authWho"></strong></span>
+            <button id="logoutBtn" class="ghost auth-logout">Log out</button>
+          </div>
+        </div>
+
         <input id="nameInput" maxlength="16" placeholder="Your name" autocomplete="off" />
         <button id="createBtn" class="primary">Create Room</button>
         <div class="divider"><span>or</span></div>
@@ -52,7 +73,7 @@
     <section id="screen-lobby" class="screen">
       <div class="card">
         <h2>Lobby</h2>
-        <p class="hint">Share the room code so others can join. Need at least <span id="minPlayers">2</span> players.</p>
+        <p class="hint">Share the room code so others can join. <span id="minPlayers">2</span> player minimum.</p>
 
         <div id="modeControls" class="mode-controls">
           <div class="seg" id="modeSeg">
@@ -60,7 +81,7 @@
             <button id="modeHighBtn" class="seg-btn">High-stakes</button>
           </div>
           <div id="buyInRow" class="buyin-row">
-            <label for="buyInInput">Buy-in (from stash)</label>
+            <label for="buyInInput">Buy-In</label>
             <input id="buyInInput" type="number" min="1" />
           </div>
           <p id="modeSummary" class="hint"></p>
@@ -128,6 +149,15 @@
       </div>
       <canvas id="gameCanvas" width="900" height="560"></canvas>
       <p class="hint" id="playHint"><kbd>WASD</kbd>/arrows move · <kbd>Space</kbd> lunge · <kbd>Click</kbd> shoot (slows them)</p>
+
+      <!-- Type Race minigame (shown instead of the canvas). -->
+      <div id="typeRace" class="type-race hidden">
+        <div class="race-track" id="raceTrack"><div class="finish-flag">🏁</div></div>
+        <div class="type-paragraph" id="typeParagraph"></div>
+        <textarea id="typeInput" class="type-input" rows="3" autocomplete="off"
+          autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Type here…"></textarea>
+        <p class="hint type-status" id="typeStatus"></p>
+      </div>
     </section>
 
     <!-- RESULTS -->
@@ -175,6 +205,22 @@
       <div id="sbfError" class="error"></div>
     </div>
     <p class="sidebets-hint">Flip a coin, winner takes all.</p>
+  </aside>
+
+  <!-- Room chat: talk to everyone in the room, any phase. -->
+  <aside id="chat" class="chat hidden">
+    <button id="chatHeader" class="chat-header" type="button">
+      <span class="chat-title">💬 Chat</span>
+      <span id="chatUnread" class="chat-unread hidden">0</span>
+      <span id="chatChevron" class="chat-chevron">▾</span>
+    </button>
+    <div class="chat-body">
+      <div id="chatLog" class="chat-log"></div>
+      <form id="chatForm" class="chat-form">
+        <input id="chatInput" maxlength="280" placeholder="Say something…" autocomplete="off" />
+        <button type="submit" class="chat-send">Send</button>
+      </form>
+    </div>
   </aside>
 
   <script src="/socket.io/socket.io.js"></script>

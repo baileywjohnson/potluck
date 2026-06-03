@@ -8,6 +8,8 @@ the pot. Most chips after all rounds wins.
 
 ## Quick start
 
+Requires **Node 22.5+** (for the built-in `node:sqlite` used by accounts).
+
 ```bash
 npm install
 npm start
@@ -52,11 +54,18 @@ drives your **level** — each level costs a little more than the last. Your lev
 and an XP bar show in the wallet bar; levels also appear in the lobby and the
 side-bets panel.
 
-### Side bets
+### Side Bets
 
 Any two players can wager a **coin flip** from their bankrolls at any time (lobby
 or mid-match) via the side-bets panel — challenge someone, they accept, the coin
 decides. Independent of the poker pot.
+
+### Chat
+
+A **room chat** sits in the bottom-right, available the whole time you're in a
+room (lobby through game over). Messages fan out to everyone over Socket.IO; the
+server keeps a short backlog so anyone joining — or reconnecting — sees recent
+history. The panel collapses, with an unread badge while it's tucked away.
 
 Either way, at match end every participant's **leftover chips are banked** into
 their bankroll, and the final standings show each player's net result. So
@@ -90,6 +99,28 @@ Ante and bet sizes scale to the stakes (10% / 20% of your starting stake), so it
 feels the same in low- and high-stakes. Chips only ever move into the pot and out
 to the winner, so the match economy is always conserved.
 
+### Accounts & saved progress
+
+Logging in is **optional** — you can still quick-play as a guest, where your Stash,
+level and wins live only in memory and vanish when you leave. Create an account
+(username + password) and that same progress is **saved and restored** across
+sessions, devices, and server restarts. Passwords are hashed with scrypt (never
+stored in plaintext); accounts and progress live in a local **SQLite** file
+(`data/potluck.db`, via Node's built-in `node:sqlite` — no external service).
+
+The login is kept in `localStorage` (so it persists across reloads and tabs),
+separate from the per-tab room-reconnect token. When a logged-in player joins a
+room their seat is **seeded** from their account, and changes are **written back**
+at every money/XP event (buy-in, side-bet flips, each minigame's XP/win award, and
+the end-of-match chip banking). Guests are untouched by any of this.
+
+An account can be in **only one room at a time**: trying to create/join from a
+second tab while you're still active elsewhere is refused (it tells you which room
+you're in). If your old seat is merely *disconnected* — you closed the tab — it's
+freed automatically so you're never locked out. Reclaiming your own seat
+(`room:rejoin`) is always allowed. Guests have no cross-tab identity, so the rule
+doesn't apply to them.
+
 ### Reconnection
 
 A player's identity is a stable `playerId` plus a secret `token` (stored in the
@@ -101,13 +132,45 @@ auto-reclaims the seat on reconnect; others see you tagged **AWAY** meanwhile. I
 the grace window expires you're removed for good (and the match returns to the
 lobby if too few players remain).
 
-### Minigame: Coin Rush
+### Minigames
 
-Steer your avatar (WASD / arrow keys) around an arena and grab the most coins in
-20 seconds. Tap **Space** to lunge forward (≈5s cooldown), and **left-click** to
-fire a shot that briefly **slows** whoever it hits. Fully server-simulated — clients
-send a movement direction, a boost press, and an aim point; the browser renders at
-the display's refresh rate, interpolating between snapshots for smooth motion.
+The match rotates through the registry in `server/minigames/`.
+
+**Coin Rush** — steer your avatar (WASD / arrow keys) around an arena and grab the
+most coins in 20 seconds. Tap **Space** to lunge forward (≈5s cooldown), and
+**left-click** to fire a shot that briefly **slows** whoever it hits. Fully
+server-simulated — clients send a movement direction, a boost press, and an aim
+point; the browser renders at the display's refresh rate, interpolating between
+snapshots for smooth motion. Pays out **proportionally** (split by coins).
+
+**Type Race** — a race to type a ~250-character paragraph correctly; each player
+is a **colored slug** that crawls toward the finish line as their correct prefix
+grows. A mistake stalls your slug until you fix it (backspace). First slug to the
+finish wins (**winner-take-all**); if the timer runs out, the furthest-along wins.
+The server scores the correct prefix from each player's submitted text, so progress
+is authoritative. A 100 WPM typist finishes in about 30 seconds.
+
+**Fruit Drop** — a competitive Suika: everyone has their own jar. Aim with the
+mouse and **click / Space** to drop fruit; two of the same kind that touch **merge**
+into the next size up and score. Most points when the 60s timer ends wins
+(**winner-take-all**); overflow your jar past the top line and it freezes (you're
+out). The server runs a compact circle-physics sim (gravity + a positional
+collision solver + merging) for every jar. The jar is narrow with a low danger
+line and bigger/more varied drops, so it fills fast. Rendered with pre-baked
+glossy fruit sprites, interpolated falls, and merge-pop sparkles.
+
+**Trapdoor** — a grid of tiles; **click** one to stand on it. Every 10 seconds a
+random ~15% of the tiles **drop away** — be somewhere safe. Survivors get another
+10 seconds to stay or move, up to 5 drops. Last one standing **takes the pot**;
+if several remain at the final drop — or everyone drops at once — they **split it
+evenly** (the `split` payout mode). Runs its own internal place→drop→place loop.
+
+**Lightcycles** — a competitive Tron. Your rider moves nonstop, leaving a solid
+wall of light behind it; **steer with WASD / arrows** (90° turns, no reversing).
+Crash into **any** trail — yours or a rival's — or the arena wall and you're out.
+Last rider standing **takes the pot**; if several survive to the time cap, or
+everyone crashes on the same step, they **split it evenly** (the `split` payout
+mode). Server-authoritative grid stepping with a collision grid.
 
 ## Architecture
 
@@ -116,10 +179,16 @@ server/
   index.js            Express + Socket.IO; serves the client, routes events
   Room.js             Phase state machine, betting, scoring, broadcasts
   poker.js            Fixed-limit betting round (ante/check/bet/raise/fold)
+  auth.js             Account signup/login/resume + scrypt hashing
+  db.js               SQLite (node:sqlite) store for accounts + progress
   config.js           Tunables (env-overridable, e.g. BETTING_MS=2000)
   minigames/
     index.js          Registry + per-round selection
-    coinRush.js       Reference minigame implementing the Minigame interface
+    coinRush.js       Arena coin-collector (movement, boost, shoot)
+    typeRace.js       Typing race (slugs to the finish line)
+    suika.js          Competitive Suika fruit-merge (circle physics)
+    trapdoor.js       Tile-drop survival (place → drop → split payout)
+    lightcycle.js     Tron light-cycle duel (grid trails, last rider standing)
 public/
   index.html · styles.css · client.js   Canvas client, phase-driven screens
 ```
@@ -132,9 +201,32 @@ clients render `state` snapshots and a fast `game:tick` stream during play.
 Create `server/minigames/yourGame.js` exporting
 `{ id, name, blurb, payout, create(players) }` where `create` returns an object
 with `handleInput`, `update(dt) → done`, `getState()`, and
-`getResult() → { winnerId, scores }`. Set `payout: 'winner'` (all or nothing) or
-`payout: 'proportional'` (split the pot by score). Register it in
-`minigames/index.js` and it joins the round rotation automatically.
+`getResult() → { winnerId, scores }`. The payout mode decides who gets the pot:
+`'winner'` (all or nothing to the top scorer), `'proportional'` (split by score),
+or `'split'` (even split among a `winners: [ids]` list that `getResult` returns —
+used by Trapdoor and Lightcycles for survivors). Optional per-game actions
+(`boost`, `shoot`, `handleType`, `aim`/`drop`, `place`, `turn`) hang off the
+instance and are routed through
+`Room.handleAction`. Register it in `minigames/index.js` and it joins the rotation.
+
+### Graphics convention (the norm)
+
+Canvas minigames should render to the shared **"enhanced" standard** — the bar set
+by Coin Rush, Fruit Drop, and Trapdoor — not flat shapes. In `public/client.js`:
+
+- **Draw via the rAF loop.** Buffer each `game:tick` into `snapshots` and let the
+  `requestAnimationFrame` loop (`drawGame`) dispatch by `frame.mode`, so rendering
+  runs at the display's refresh rate (and can interpolate positions by entity id
+  for smooth motion).
+- **Cache sprites.** Pre-render art once with the `sprite(lw, lh, draw)` helper
+  (auto-supersampled to the device pixel ratio via `ensureCanvas`) and blit it —
+  don't build gradients per frame. Reuse `ballSprite()`/`drawBall()` for player
+  icons and `roundRectPath(...)` for panels.
+- **A backdrop + particles.** Fill a gradient backdrop, and pop juice on key events
+  (pickups, merges, eliminations) with `spawnBurst(...)` / `drawParticles(dt)`.
+
+A purely DOM minigame (e.g. Type Race) instead leans on the parchment CSS theme
+with shaded SVG art.
 
 ## Config / tuning
 

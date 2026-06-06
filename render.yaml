@@ -1,0 +1,20 @@
+# Render Blueprint for Potluck.
+# Deploys the game as a SINGLE always-on Node web service. Room state lives in
+# memory and the game uses WebSockets, so it must stay at one instance — do NOT
+# enable autoscaling or add replicas (rooms would split across instances).
+#
+# Accounts/Stash are stored in a local SQLite file. On the free plan the disk is
+# ephemeral, so they reset whenever the service restarts or spins down after
+# idle. To keep them, upgrade to a paid instance and attach a Disk mounted at
+# /var/data, then set POTLUCK_DB=/var/data/potluck.db (see README).
+services:
+  - type: web
+    name: potluck
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "24"

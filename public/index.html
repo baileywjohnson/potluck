@@ -58,7 +58,7 @@
           </div>
         </div>
 
-        <input id="nameInput" maxlength="16" placeholder="Your name" autocomplete="off" />
+        <input id="nameInput" maxlength="16" placeholder="Display name" autocomplete="off" />
         <button id="createBtn" class="primary">Create Room</button>
         <div class="divider"><span>or</span></div>
         <div class="join-row">
@@ -76,13 +76,15 @@
         <p class="hint">Share the room code so others can join. <span id="minPlayers">2</span> player minimum.</p>
 
         <div id="modeControls" class="mode-controls">
-          <div class="seg" id="modeSeg">
-            <button id="modeLowBtn" class="seg-btn">Low-stakes</button>
-            <button id="modeHighBtn" class="seg-btn">High-stakes</button>
-          </div>
-          <div id="buyInRow" class="buyin-row">
-            <label for="buyInInput">Buy-In</label>
-            <input id="buyInInput" type="number" min="1" />
+          <div class="mode-row">
+            <div class="seg" id="modeSeg">
+              <button id="modeLowBtn" class="seg-btn">Low-stakes</button>
+              <button id="modeHighBtn" class="seg-btn">High-stakes</button>
+            </div>
+            <div id="buyInRow" class="buyin-row">
+              <label for="buyInInput">Buy-In</label>
+              <input id="buyInInput" type="number" min="1" />
+            </div>
           </div>
           <p id="modeSummary" class="hint"></p>
         </div>
@@ -200,7 +202,7 @@
     <div id="sideBetForm" class="sidebet-form hidden">
       <div class="sbf-row">
         <input id="sbfAmount" type="number" min="1" placeholder="amount" />
-        <button id="sbfFlip" class="pa primary">Flip!</button>
+        <button id="sbfFlip" class="pa primary">Challenge</button>
       </div>
       <div id="sbfError" class="error"></div>
     </div>

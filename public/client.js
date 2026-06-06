@@ -157,6 +157,11 @@ const readBuyIn = () =>
 $('modeLowBtn').onclick = () => socket.emit('room:setMode', { mode: 'low' });
 $('modeHighBtn').onclick = () => socket.emit('room:setMode', { mode: 'high', buyIn: readBuyIn() });
 $('buyInInput').onchange = () => socket.emit('room:setMode', { mode: 'high', buyIn: readBuyIn() });
+// Buy-in is a whole number of chips: block anything that isn't a digit (type=number
+// otherwise still accepts "e", ".", "+", "-", and lets you paste letters).
+$('buyInInput').addEventListener('beforeinput', (e) => {
+  if (e.data && /\D/.test(e.data)) e.preventDefault();
+});
 
 // ---- persistent wallet bar -------------------------------------------------
 // Click the room code to copy it to the clipboard.
@@ -461,7 +466,7 @@ function renderLobby() {
     const li = document.createElement('li');
     const host = p.id === state.hostId ? '<span class="host-tag">HOST</span>' : '';
     const away = p.connected ? '' : '<span class="away-tag">AWAY</span>';
-    const broke = high && !canAfford(p) ? '<span class="out-tag">CAN\'T AFFORD</span>' : '';
+    const broke = high && !canAfford(p) ? '<span class="out-tag">POOR</span>' : '';
     const you = p.id === me.id ? ' (you)' : '';
     li.innerHTML = `<span><span style="color:${colorFor(p.id)}">●</span> ${escape(p.name)}${you} ${levelTag(p)}${host}${away}${broke}</span>
       <span class="pchips"><span class="chip-icon"></span> ${p.bankroll}</span>`;
@@ -670,13 +675,11 @@ function renderSideBets() {
     if (!row) {
       row = document.createElement('li');
       row.className = 'sb-row';
-      // The coin-slot is left untouched by updates so its flip animation survives re-renders.
       // Layout mirrors a lobby row: [dot · name · Lv badge] on the left, the
-      // bankroll right-aligned. (Plus the coin-slot for flip animations and the
-      // accept/decline actions, which sit just left of the bankroll.)
+      // bankroll right-aligned. The accept/decline actions float in the gutter to
+      // the right (see .sb-actions) — and the coin flip animates there too.
       row.innerHTML = '<span class="sb-dot"></span><span class="sb-name"></span>'
         + '<span class="sb-lvl lvl-tag"></span>'
-        + `<span class="coin-slot" data-pid="${p.id}"></span>`
         + '<span class="sb-actions"></span>'
         + '<span class="sb-bank"></span>';
       sideRowEls.set(p.id, row);
@@ -692,6 +695,10 @@ function renderSideBets() {
     row.classList.toggle('away', !p.connected);
     row.classList.toggle('incoming', !!incoming);
     row.classList.toggle('selected', selectedSideTarget === p.id);
+
+    // While a coin is flipping in this row's gutter, leave .sb-actions alone so
+    // the animation (and its result) survives the resolving state broadcast.
+    if (row.dataset.flipping) { row.onclick = null; continue; }
 
     const actions = row.querySelector('.sb-actions');
     actions.innerHTML = '';
@@ -739,23 +746,35 @@ function miniBtn(label, kind, onClick) {
   return b;
 }
 
-// Spin a coin next to each involved player; reveal the result on landing.
+// Flip a coin right where the Flip/✕ buttons were — in each involved player's
+// gutter — then reveal the +/− result there. If I'm in the bet I only see the
+// opponent's row, so show MY outcome there; as a spectator each row shows that
+// player's own outcome.
 function animateCoinFlip(d) {
+  const involvedMe = d.fromId === me.id || d.toId === me.id;
   for (const pid of [d.fromId, d.toId]) {
-    const slot = document.querySelector(`.coin-slot[data-pid="${pid}"]`);
-    if (!slot) continue;
-    const won = pid === d.winnerId;
-    slot.innerHTML = '<span class="coin">🪙</span>';
+    const row = sideRowEls.get(pid);
+    if (!row) continue; // my own row isn't in the list
+    const actions = row.querySelector('.sb-actions');
+    const won = involvedMe ? d.winnerId === me.id : pid === d.winnerId;
+    row.dataset.flipping = '1';        // tell renderSideBets to leave this alone
+    actions.innerHTML = '<span class="coin">🪙</span>';
     setTimeout(() => {
-      if (!slot.isConnected) return;
-      slot.innerHTML = `<span class="coin-result ${won ? 'win' : 'lose'}">${won ? '+' : '−'}${d.amount}</span>`;
-      setTimeout(() => { if (slot.isConnected) slot.innerHTML = ''; }, 2600);
+      if (!row.isConnected) return;
+      actions.innerHTML = `<span class="coin-result ${won ? 'win' : 'lose'}">${won ? '+' : '−'}${d.amount}</span>`;
+      setTimeout(() => {
+        delete row.dataset.flipping;
+        if (state && !hasLeft) renderSideBets(); // restore (the challenge is now gone)
+      }, 2200);
     }, 1300);
   }
-  if (d.fromId === me.id || d.toId === me.id) {
+  if (involvedMe) {
     const won = d.winnerId === me.id;
     const opp = d.fromId === me.id ? d.toName : d.fromName;
-    showToast(`🪙 You ${won ? 'won' : 'lost'} ${d.amount} ${won ? 'from' : 'to'} ${opp}!`, won ? 'win' : 'lose');
+    // Wait for the coin to land before announcing the outcome.
+    setTimeout(() => {
+      showToast(`🪙 You ${won ? 'won' : 'lost'} ${d.amount} ${won ? 'from' : 'to'} ${opp}!`, won ? 'win' : 'lose');
+    }, 1300);
   }
 }
 

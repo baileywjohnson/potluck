@@ -147,7 +147,9 @@ export class Room {
     if (player.socketId !== socketId) return;
 
     player.connected = false;
-    this.cancelSideBetsFor(playerId); // they can't accept/await while away
+    // Keep any pending side bets — a disconnect is usually just a refresh, and
+    // the seat (with its challenges) is held through the grace window. They're
+    // only cleared if the seat is permanently freed (see removePlayer).
 
     // Don't leave the host badge on an absent player.
     if (playerId === this.hostId) {
@@ -411,16 +413,20 @@ export class Room {
   respondSideBet(playerId, challengeId, accept) {
     const sb = this.sideBets.get(challengeId);
     if (!sb || sb.toId !== playerId) return { error: 'That challenge is gone.' };
-    this.sideBets.delete(challengeId);
 
-    if (!accept) { this.broadcast(); return { ok: true }; }
+    if (!accept) { this.sideBets.delete(challengeId); this.broadcast(); return { ok: true }; }
 
     const from = this.players.get(sb.fromId);
     const to = this.players.get(sb.toId);
+    // Don't resolve while the challenger is away (e.g. mid-refresh) — they'd
+    // miss the flip and just see their stash change. Leave it pending for them.
+    if (from && !from.connected) return { error: `${from.name} stepped away — try again when they're back.` };
     if (!from || !to || from.bankroll < sb.amount || to.bankroll < sb.amount) {
+      this.sideBets.delete(challengeId);
       this.broadcast();
       return { error: 'Someone can no longer cover the bet.' };
     }
+    this.sideBets.delete(challengeId);
 
     const fromWins = Math.random() < 0.5;
     const winner = fromWins ? from : to;

@@ -346,13 +346,16 @@ kbd { background: var(--paper); border: 2px solid var(--ink); border-radius: 6px
 
 /* Lobby stakes controls */
 .mode-controls { margin: 14px 0 6px; }
+/* Toggle + buy-in sit on one row; the summary line wraps below. align-items:
+   stretch makes the buy-in box match the toggle's height exactly. */
+.mode-row { display: flex; align-items: stretch; justify-content: center; gap: 14px; flex-wrap: wrap; }
 .seg { display: inline-flex; border: 2.5px solid var(--ink); border-radius: var(--sketch); overflow: hidden; box-shadow: 2px 3px 0 var(--shadow); }
 .seg-btn { background: var(--paper2); border-radius: 0; padding: 9px 18px; font-weight: 700; box-shadow: none; border: none; }
 .seg-btn:hover { transform: none; box-shadow: none; }
 .seg-btn.active { background: var(--accent); color: #3a2410; }
-.buyin-row { margin-top: 12px; text-align: center; }
-.buyin-row label { display: block; color: var(--muted); font-size: .9rem; margin-bottom: 4px; }
-.buyin-row input { max-width: 180px; margin: 0; }
+.buyin-row { display: flex; align-items: stretch; gap: 8px; }
+.buyin-row label { display: flex; align-items: center; color: var(--muted); font-size: .9rem; margin: 0; white-space: nowrap; }
+.buyin-row input { width: 120px; margin: 0; padding: 9px 12px; }
 
 /* Spectator banner */
 .spectator-banner {
@@ -404,7 +407,7 @@ kbd { background: var(--paper); border: 2px solid var(--ink); border-radius: 6px
   position: fixed; top: 64px; left: 12px; z-index: 35; width: 220px;
   background: var(--paper); border: 2.5px solid var(--ink); border-radius: var(--sketch-card);
   box-shadow: 5px 7px 0 var(--shadow); padding: 12px 12px 10px; color: var(--ink);
-  max-height: calc(100dvh - 80px); overflow-y: auto;
+  overflow: visible; /* let each row's actions float out into the gutter on the right */
 }
 .sidebets-title { font-family: 'Caveat', cursive; font-weight: 700; font-size: 1.5rem; text-align: center; margin-bottom: 6px; }
 .sidebets-hint { color: var(--muted); font-size: .8rem; text-align: center; margin: 8px 2px 0; }
@@ -413,30 +416,47 @@ kbd { background: var(--paper); border: 2px solid var(--ink); border-radius: 6px
 .sb-row {
   display: flex; align-items: center; gap: 6px; padding: 6px 8px; margin: 5px 0;
   background: var(--paper2); border: 2px solid var(--line); border-radius: var(--sketch); cursor: pointer;
+  position: relative; /* anchor for the actions that float in the right-hand gutter */
 }
 .sb-row.selected { border-color: var(--accent); box-shadow: 1px 2px 0 var(--shadow); }
 .sb-row.away { opacity: .5; cursor: default; }
 .sb-row.incoming { border-color: var(--accent-ink); background: #fff5df; cursor: default; animation: nudge 1s ease-in-out infinite; }
 @keyframes nudge { 0%,100% { transform: translateX(0);} 50% { transform: translateX(-2px);} }
+/* Responding to a challenge: drop the level + bankroll so the accept/decline
+   buttons keep clear of the row content. */
 .sb-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--ink); flex: 0 0 auto; }
 .sb-name { font-weight: 700; font-size: .92rem; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sb-lvl { flex: 0 0 auto; }
 .sb-row .lvl-tag { margin-left: 0; } /* row gap handles spacing here */
-.sb-actions { display: flex; gap: 4px; margin-left: auto; } /* pushes itself + the bankroll to the right */
-.sb-bank { font-size: .76rem; color: var(--muted); white-space: nowrap; }
-.sb-mini { padding: 3px 8px; font-size: .78rem; min-width: 0; border-width: 2px; box-shadow: 1px 1px 0 var(--shadow); }
+.sb-bank { font-size: .76rem; color: var(--muted); white-space: nowrap; margin-left: auto; } /* right-aligned in the row */
+/* The accept/decline buttons (and the pending hourglass) float just outside the
+   panel's right edge, vertically centred on their row. The 24px clears the row
+   border + panel padding + panel border so they sit in the gutter, not on top. */
+.sb-actions {
+  position: absolute; left: calc(100% + 24px); top: 50%; transform: translateY(-50%);
+  display: flex; gap: 5px; align-items: center;
+}
+.sb-mini { padding: 3px 8px; font-size: .78rem; min-width: 0; border-width: 2px; box-shadow: 1px 1px 0 var(--shadow); margin: 0; }
 .sb-mini.yes { background: var(--accent2); color: #1f3d18; }
 .sb-mini.no { background: var(--danger); color: #fff4ef; }
-.sb-wait { font-size: .72rem; color: var(--accent-ink); white-space: nowrap; }
+/* Pending (outgoing) marker — a little pill so it reads over the game behind it. */
+.sb-wait {
+  font-size: .74rem; color: var(--accent-ink); white-space: nowrap;
+  background: var(--paper); border: 2px solid var(--line); border-radius: var(--sketch-pill);
+  padding: 3px 9px; box-shadow: 1px 2px 0 var(--shadow);
+}
 
-/* Coin slot + flip animation next to a player's name. */
-.coin-slot { min-width: 18px; display: inline-flex; align-items: center; justify-content: center; }
-.coin-slot .coin { display: inline-block; animation: coinspin 1.3s ease-in-out; }
+/* Coin flip animation — plays in the .sb-actions gutter where the buttons were. */
+.coin { display: inline-block; font-size: 1.15rem; animation: coinspin 1.3s ease-in-out; }
 @keyframes coinspin {
   0% { transform: rotateY(0) scale(1); }
   100% { transform: rotateY(1980deg) scale(1.1); }
 }
-.coin-result { font-weight: 800; font-size: .82rem; animation: badgePop .35s ease; }
+.coin-result {
+  font-weight: 800; font-size: .82rem; animation: badgePop .35s ease; white-space: nowrap;
+  background: var(--paper); border: 2px solid var(--line); border-radius: var(--sketch-pill);
+  padding: 2px 9px; box-shadow: 1px 2px 0 var(--shadow);
+}
 .coin-result.win { color: #3f7a30; }
 .coin-result.lose { color: var(--danger); }
 
@@ -447,7 +467,7 @@ kbd { background: var(--paper); border: 2px solid var(--ink); border-radius: 6px
 .sbf-row input::-webkit-inner-spin-button,
 .sbf-row input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .sbf-row .pa { width: 100%; min-width: 0; margin-top: 0; padding: 10px 12px; font-size: 1rem; }
-#sbfError { font-size: .78rem; }
+#sbfError { font-size: .78rem; text-align: center; }
 
 @media (max-width: 920px) {
   .sidebets { width: 168px; top: 56px; left: 8px; }

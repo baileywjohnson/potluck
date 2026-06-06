@@ -19,6 +19,28 @@ npm start
 One player clicks **Create Room** and shares the 4-letter code; others **Join**.
 The host starts the match. Open multiple tabs to play solo against yourself.
 
+## Hosting
+
+The server is **stateful**: rooms live in memory and gameplay uses WebSockets, so
+it must run as a **single always-on instance** — no serverless, no autoscaling,
+no replicas (rooms would split across instances).
+
+### Render (one click via the included `render.yaml`)
+
+1. Push to GitHub (already wired to `origin`).
+2. In the [Render dashboard](https://dashboard.render.com): **New ➜ Blueprint**, pick
+   this repo. It reads `render.yaml` and creates the web service (`npm ci` /
+   `npm start`, Node 24, WebSockets + HTTPS handled). Or **New ➜ Web Service** and
+   accept the auto-detected Node settings.
+3. Deploy, then share the `https://<name>.onrender.com` URL.
+
+`PORT` is injected by the host and read automatically — don't set it.
+
+> **Free plan caveat:** the disk is ephemeral and the service spins down when
+> idle, so **accounts/Stash reset on every restart or redeploy**. To keep them,
+> use a paid instance with a **Disk** mounted at `/var/data` and set
+> `POTLUCK_DB=/var/data/potluck.db`.
+
 ## The game loop
 
 ```

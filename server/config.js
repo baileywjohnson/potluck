@@ -5,8 +5,11 @@ const num = (key, fallback) =>
   process.env[key] !== undefined ? Number(process.env[key]) : fallback;
 
 export const CONFIG = {
-  // A player's persistent wallet, kept between matches. New players start here.
-  STARTING_BANKROLL: num('STARTING_BANKROLL', 1000),
+  // A player's persistent wallet, kept between matches. New players start broke:
+  // low-stakes is the on-ramp (the house stakes you for free, and you bank
+  // whatever you have left at the end of a match), so you grind a bankroll up
+  // before you can afford to sit down at a high-stakes table.
+  STARTING_BANKROLL: num('STARTING_BANKROLL', 0),
 
   // Low-stakes mode: the free even stake the house gives everyone at the start
   // of each match (you must make it last; no top-ups between minigames).
@@ -26,12 +29,14 @@ export const CONFIG = {
   XP_SCORE_CAP: num('XP_SCORE_CAP', 40),       // max score-based XP per minigame
 
   // Poker-style betting (fixed-limit). Each minigame is preceded by one betting
-  // round: everyone antes, then bets/raises in fixed increments, winner of the
-  // minigame takes the pot. Ante and bet are fractions of a player's starting
-  // match stake so they scale between low- and high-stakes.
-  ANTE_FRACTION: num('ANTE_FRACTION', 0.1),    // ante = 10% of the starting stake
+  // round: the button posts a blind, then bets/raises go in fixed increments and
+  // the winner of the minigame takes the pot. Blind and bet are fractions of a
+  // player's starting match stake so they scale between low- and high-stakes.
+  // Only ONE seat is forced in per round and the button rotates, so folding a
+  // hand you don't want costs you nothing.
+  BLIND_FRACTION: num('BLIND_FRACTION', 0.1),  // blind = 10% of the starting stake
   BET_FRACTION: num('BET_FRACTION', 0.2),      // bet/raise increment = 20% of the stake
-  MAX_BETS: num('MAX_BETS', 4),                // opening bet + up to 3 raises per round
+  MAX_BETS: num('MAX_BETS', 4),                // the blind + up to 3 raises per round
   TURN_MS: num('TURN_MS', 15000),              // per-turn timer; auto-check or auto-fold
 
   // Phase durations in milliseconds.

@@ -69,6 +69,24 @@ let authToken = readAuthToken();
 function readAuthToken() { try { return window.localStorage.getItem(AUTH_KEY) || null; } catch { return null; } }
 function writeAuthToken(t) { try { t ? window.localStorage.setItem(AUTH_KEY, t) : window.localStorage.removeItem(AUTH_KEY); } catch {} }
 
+// A stable id for THIS browser, kept in localStorage so every tab shares it.
+// The server uses it to stop one browser taking two seats at the same table.
+// The room session above stays per-tab, so you can still be in two *different*
+// rooms in two tabs. If storage is unavailable (private mode) this is null and
+// the server simply skips the check.
+const DEVICE_KEY = 'potluck.device';
+const deviceId = loadDeviceId();
+function loadDeviceId() {
+  try {
+    let id = window.localStorage.getItem(DEVICE_KEY);
+    if (!id) {
+      id = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      window.localStorage.setItem(DEVICE_KEY, id);
+    }
+    return id;
+  } catch { return null; }
+}
+
 function loadSession() {
   try { return JSON.parse(store.getItem(SESSION_KEY)) || null; }
   catch { return null; }
@@ -109,7 +127,7 @@ const playerName = () => (account ? account.username : $('nameInput').value.trim
 $('createBtn').onclick = () => {
   hasLeft = false;
   const name = playerName();
-  socket.emit('room:create', { name }, (res) => {
+  socket.emit('room:create', { name, deviceId }, (res) => {
     if (res.ok) enterRoom(res, name);
     else showJoinError(res.error);
   });
@@ -119,7 +137,7 @@ $('joinBtn').onclick = () => {
   const name = playerName();
   const code = $('codeInput').value.trim().toUpperCase();
   if (!code) return showJoinError('Enter a room code.');
-  socket.emit('room:join', { code, name }, (res) => {
+  socket.emit('room:join', { code, name, deviceId }, (res) => {
     if (res.ok) enterRoom(res, name);
     else showJoinError(res.error);
   });
@@ -489,18 +507,17 @@ const ACTION_LABEL = { check: 'CHECK', call: 'CALL', bet: 'BET', raise: 'RAISE',
 
 function renderBetting() {
   const pk = state.poker;
-  const proportional = state.minigame?.payout === 'proportional';
   $('betRound').textContent = `${state.round} / ${state.totalRounds}`;
   $('betGameName').textContent = state.minigame?.name || '';
-  $('betStakes').textContent = state.mode === 'high'
+  $('betStakes').textContent = (state.mode === 'high'
     ? `High-stakes · ${state.buyIn} buy-in`
-    : `Low-stakes · ${state.config.lowStipend} stake`;
+    : `Low-stakes · ${state.config.lowStipend} stake`) + ` · ${state.blind} blind`;
   if (!pk) return;
 
   $('potAmount').textContent = pk.pot;
-  $('feltSub').textContent = pk.currentBet > 0
+  $('feltSub').textContent = pk.currentBet > pk.blindAmount
     ? `current bet ${pk.currentBet}`
-    : (proportional ? 'pot shared by coins' : 'winner takes the pot');
+    : 'winner takes the pot';
 
   renderSeats(pk);
 
@@ -520,13 +537,17 @@ function renderBetting() {
   if (myTurn && meP) {
     const toCall = Math.max(0, pk.currentBet - (pk.committed[me.id] || 0));
     const underCap = pk.betLevel < pk.betCap;
+    const opened = pk.currentBet > 0;   // the blind opens the betting
+    const iAmBlind = pk.blindId === me.id;
     $('toCallInfo').innerHTML = toCall > 0
       ? `To stay in you must call <b>${Math.min(toCall, meP.chips)}</b> · you have ${meP.chips}`
-      : `It's checked to you · you have ${meP.chips} chips`;
+      : iAmBlind
+        ? `You're on the blind for <b>${pk.blindAmount}</b> · you have ${meP.chips} chips`
+        : `It's checked to you · you have ${meP.chips} chips`;
     setAct('check', toCall === 0, 'Check');
     setAct('call', toCall > 0, `Call ${Math.min(toCall, meP.chips)}`);
-    setAct('bet', toCall === 0 && underCap && meP.chips > 0, `Bet ${Math.min(state.betSize, meP.chips)}`);
-    setAct('raise', toCall > 0 && underCap && meP.chips > toCall, `Raise to ${pk.currentBet + state.betSize}`);
+    setAct('bet', !opened && underCap && meP.chips > 0, `Bet ${Math.min(state.betSize, meP.chips)}`);
+    setAct('raise', opened && underCap && meP.chips > toCall, `Raise to ${pk.currentBet + state.betSize}`);
     setAct('fold', true, 'Fold');
     startTurnBar(pk.turnEndsAt);
   }
@@ -572,7 +593,7 @@ function renderSeats(pk) {
           '<div class="seat-plate"><div class="seat-name"></div><div class="seat-stack"></div></div>' +
           '<div class="seat-badge empty"></div>' +
         '</div>' +
-        '<div class="dealer-btn" style="display:none">D</div>';
+        '<div class="dealer-btn" title="Dealer button — posts this round\'s blind" style="display:none">D</div>';
       seatEls.set(id, seat);
       seatsBox.appendChild(seat);
     }
@@ -1125,7 +1146,8 @@ function drawTilesFrame(frame) {
   ctx.fillText(sub === 'choose' ? `Pick a safe tile — ${Math.ceil(subLeft)}s`
     : sub === 'falling' ? '⬇  TILES DROPPING!' : 'Round over', arenaW / 2, 34);
   ctx.font = "600 15px 'Patrick Hand', system-ui"; ctx.fillStyle = '#b8a890';
-  ctx.fillText(`Drop ${Math.min(frame.fallsDone + (sub === 'falling' ? 1 : 0), frame.maxFalls)} / ${frame.maxFalls}   ·   ${alive} standing`, arenaW / 2, 54);
+  // No fixed number of drops any more — it runs until one player is left.
+  ctx.fillText(`Drop ${frame.fallsDone + (sub === 'falling' ? 1 : 0)}   ·   ${alive} standing`, arenaW / 2, 54);
   $('gameTimer').textContent = sub === 'choose' ? `${Math.ceil(subLeft)}s` : '';
 
   const area = { x: 24, y: 70, w: arenaW - 48, h: arenaH - 86 };
@@ -1615,17 +1637,13 @@ setInterval(() => {
 function renderResults() {
   const r = state.result;
   if (!r) return;
-  const proportional = r.minigame.payout === 'proportional';
-  const split = r.minigame.payout === 'split';
-  const names = (r.winnerNames && r.winnerNames.length) ? r.winnerNames : (r.winnerName ? [r.winnerName] : []);
+  const winner = r.winnerName;
   $('resRound').textContent = r.round;
   $('resWinnerLine').textContent =
-    names.length === 0 ? 'No winner this round.'
-    : r.uncontested ? `🏆 ${names[0]} took the ${r.pot} pot — everyone else folded!`
-    : split && names.length > 1 ? `🤝 ${joinNames(names)} split the ${r.pot} pot!`
-    : split ? `🏆 ${names[0]} survived and took the ${r.pot} pot!`
-    : proportional ? `🥇 ${names[0]} grabbed the most — the ${r.pot} pot is split by coins!`
-    : `🏆 ${names[0]} won ${r.minigame.name} and took the ${r.pot} pot!`;
+    !winner ? 'No winner this round.'
+    : r.uncontested ? `🏆 ${winner} took the ${r.pot} pot — everyone else folded!`
+    : r.tiebreak ? `🪙 Dead heat — ${winner} won the coin toss and the ${r.pot} pot!`
+    : `🏆 ${winner} won ${r.minigame.name} and took the ${r.pot} pot!`;
 
   const scores = $('resScores');
   scores.innerHTML = '';
@@ -1689,11 +1707,6 @@ function renderGameOver() {
 
 // ---- helpers ---------------------------------------------------------------
 function nameOf(id) { return state?.players.find((p) => p.id === id)?.name || '?'; }
-function joinNames(names) {
-  if (names.length <= 1) return names[0] || '';
-  if (names.length === 2) return `${names[0]} & ${names[1]}`;
-  return `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`;
-}
 function escape(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

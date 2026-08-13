@@ -87,12 +87,13 @@ io.on('connection', (socket) => {
   });
 
   // --- joining ---
-  socket.on('room:create', ({ name }, ack) => {
+  socket.on('room:create', ({ name, deviceId }, ack) => {
     const account = myAccount();
     const blocked = accountRoomBlock(account?.id);
     if (blocked) return ack?.({ ok: false, error: blocked });
+    // A brand-new room is always empty, so there's no seat to collide with.
     const room = createRoom();
-    const player = room.addPlayer(socket, name, account);
+    const player = room.addPlayer(socket, name, account, deviceId);
     bind(socket, room.code, player.id);
     socket.emit('chat:history', room.chatHistory());
     // The token is the player's private reconnect key — only ever sent here.
@@ -101,18 +102,33 @@ io.on('connection', (socket) => {
     ack?.({ ok: true, code: room.code, playerId: player.id, token: player.token, state: room.getPublicState() });
   });
 
-  socket.on('room:join', ({ code, name }, ack) => {
+  socket.on('room:join', ({ code, name, deviceId }, ack) => {
     code = (code || '').toUpperCase().trim();
     // Resolve the account + one-room guard first, so freeing any stale seat
     // can't leave us holding a reference to a room that just got cleaned up.
     const account = myAccount();
     const blocked = accountRoomBlock(account?.id);
     if (blocked) return ack?.({ ok: false, error: blocked });
-    const room = rooms.get(code);
+    let room = rooms.get(code);
     if (!room) return ack?.({ ok: false, error: 'Room not found.' });
+
+    // One browser gets one seat per table. A seat that's still connected blocks
+    // the join outright; one whose tab was closed is released now so they don't
+    // sit there as a ghost — but releasing the last seat deletes the room, so
+    // re-resolve it before going on.
+    const seated = room.findDeviceSeat(deviceId);
+    if (seated) {
+      if (seated.connected) {
+        return ack?.({ ok: false, error: "You're already in this room in another tab." });
+      }
+      room.removePlayer(seated.id);
+      room = rooms.get(code);
+      if (!room) return ack?.({ ok: false, error: 'Room not found.' });
+    }
+
     if (room.players.size >= 8) return ack?.({ ok: false, error: 'Room is full.' });
     // Joining mid-match is allowed — you spectate this match and play the next.
-    const player = room.addPlayer(socket, name, account);
+    const player = room.addPlayer(socket, name, account, deviceId);
     bind(socket, room.code, player.id);
     socket.emit('chat:history', room.chatHistory());
     ack?.({ ok: true, code: room.code, playerId: player.id, token: player.token, state: room.getPublicState() });

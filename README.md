@@ -53,8 +53,9 @@ LOBBY → ( BETTING → COUNTDOWN → PLAYING → RESULTS ) × 5 rounds → GAME
 
 ### Economy: bankroll, stakes, and spectators
 
-Every player has a **persistent bankroll** (starts at 1000) that carries between
-matches. Each lobby is one of two stakes modes, chosen by the host:
+Every player has a **persistent bankroll** that carries between matches, and you
+start **broke** — low-stakes is the on-ramp where you earn one. Each lobby is one
+of two stakes modes, chosen by the host:
 
 - **Low-stakes** — the house stakes everyone a free even **50 chips at the start of
   the match**. There are *no* top-ups between minigames: you bet that stake across
@@ -103,21 +104,26 @@ can't bet or play. Eliminated players return in the next match; anyone who
 Each minigame is preceded by a **fixed-limit betting round** — you're wagering on
 *yourself* to win the minigame:
 
-1. Every player in the match **antes** (a forced bet that seeds the pot).
+1. The **button** posts a **blind** — the round's only forced money. It rotates
+   every round, so nobody pays it twice in a row and **folding a hand you don't
+   want costs you nothing**. The blind sits on the last seat to act, so it gets
+   the option to check or raise when the action comes back around.
 2. Action goes **around the table** (the first-to-act seat rotates each round to
    keep it fair). On your turn you can **check**, **bet**, **call**, **raise**, or
    **fold**. Bets and raises are a fixed increment, capped at a few per round.
 3. **Fold** = drop out: you sit this minigame out and forfeit what you've put in.
-4. The pot is paid out per the minigame's **payout mode**:
-   - `winner` (default) — **all or nothing**, the whole pot to the top scorer.
-   - `proportional` — the pot is **split by score**, so everyone who scored wins
-     a share. *Coin Rush* uses this: your cut scales with how many coins you grab.
+4. The pot is **never divided** — whoever wins the minigame takes all of it. If
+   everyone folds to one player, they win it uncontested (no minigame played).
 
-   If everyone folds to one player, they win it uncontested (no minigame played).
+   A few minigames can end with players genuinely level — two riders crashing
+   head-on, the last survivors on an exhausted board, an identical score. Rather
+   than splitting, the pot is then **drawn by lot** between them and the results
+   screen says so ("Dead heat — X won the coin toss"). See
+   `minigames/tiebreak.js`.
 
 A per-turn timer keeps things moving — time out and you auto-check, or auto-fold
 if there's a bet to you. Disconnect on your turn and it resolves the same way.
-Ante and bet sizes scale to the stakes (10% / 20% of your starting stake), so it
+Blind and bet sizes scale to the stakes (10% / 20% of your starting stake), so it
 feels the same in low- and high-stakes. Chips only ever move into the pot and out
 to the winner, so the match economy is always conserved.
 
@@ -163,7 +169,7 @@ most coins in 20 seconds. Tap **Space** to lunge forward (≈5s cooldown), and
 **left-click** to fire a shot that briefly **slows** whoever it hits. Fully
 server-simulated — clients send a movement direction, a boost press, and an aim
 point; the browser renders at the display's refresh rate, interpolating between
-snapshots for smooth motion. Pays out **proportionally** (split by coins).
+snapshots for smooth motion. Most coins takes the whole pot.
 
 **Type Race** — a race to type a ~250-character paragraph correctly; each player
 is a **colored slug** that crawls toward the finish line as their correct prefix
@@ -175,24 +181,26 @@ is authoritative. A 100 WPM typist finishes in about 30 seconds.
 **Fruit Drop** — a competitive Suika: everyone has their own jar. Aim with the
 mouse and **click / Space** to drop fruit; two of the same kind that touch **merge**
 into the next size up and score. Most points when the 60s timer ends wins
-(**winner-take-all**); overflow your jar past the top line and it freezes (you're
-out). The server runs a compact circle-physics sim (gravity + a positional
+(**winner-take-all**); overflow your jar past the top line and it freezes — you're
+out, and an out jar can't take the pot however many points it banked first. The
+server runs a compact circle-physics sim (gravity + a positional
 collision solver + merging) for every jar. The jar is narrow with a low danger
 line and bigger/more varied drops, so it fills fast. Rendered with pre-baked
 glossy fruit sprites, interpolated falls, and merge-pop sparkles.
 
-**Trapdoor** — a grid of tiles; **click** one to stand on it. Every 10 seconds a
-random ~15% of the tiles **drop away** — be somewhere safe. Survivors get another
-10 seconds to stay or move, up to 5 drops. Last one standing **takes the pot**;
-if several remain at the final drop — or everyone drops at once — they **split it
-evenly** (the `split` payout mode). Runs its own internal place→drop→place loop.
+**Trapdoor** — a grid of tiles; **click** one to stand on it. Every few seconds a
+random share of the tiles **drop away** — be somewhere safe. It runs until
+exactly **one player is left standing**, and they take the whole pot. There's no
+fixed drop count: each wave takes a bigger bite of the board and gives you less
+time to think, so the field narrows fast however many started. Runs its own
+internal place→drop→place loop.
 
 **Lightcycles** — a competitive Tron. Your rider moves nonstop, leaving a solid
 wall of light behind it; **steer with WASD / arrows** (90° turns, no reversing).
 Crash into **any** trail — yours or a rival's — or the arena wall and you're out.
-Last rider standing **takes the pot**; if several survive to the time cap, or
-everyone crashes on the same step, they **split it evenly** (the `split` payout
-mode). Server-authoritative grid stepping with a collision grid.
+Last rider standing **takes the whole pot**. There's no real time limit: every
+step consumes a cell, so the board fills and the round always resolves itself.
+Server-authoritative grid stepping with a collision grid.
 
 ## Architecture
 
@@ -200,12 +208,13 @@ mode). Server-authoritative grid stepping with a collision grid.
 server/
   index.js            Express + Socket.IO; serves the client, routes events
   Room.js             Phase state machine, betting, scoring, broadcasts
-  poker.js            Fixed-limit betting round (ante/check/bet/raise/fold)
+  poker.js            Fixed-limit betting round (blind/check/bet/raise/fold)
   auth.js             Account signup/login/resume + scrypt hashing
   db.js               SQLite (node:sqlite) store for accounts + progress
   config.js           Tunables (env-overridable, e.g. BETTING_MS=2000)
   minigames/
     index.js          Registry + per-round selection
+    tiebreak.js       Draws a single winner when a round ends level
     coinRush.js       Arena coin-collector (movement, boost, shoot)
     typeRace.js       Typing race (slugs to the finish line)
     suika.js          Competitive Suika fruit-merge (circle physics)
@@ -221,12 +230,13 @@ clients render `state` snapshots and a fast `game:tick` stream during play.
 ## Adding a minigame
 
 Create `server/minigames/yourGame.js` exporting
-`{ id, name, blurb, payout, create(players) }` where `create` returns an object
+`{ id, name, blurb, create(players) }` where `create` returns an object
 with `handleInput`, `update(dt) → done`, `getState()`, and
-`getResult() → { winnerId, scores }`. The payout mode decides who gets the pot:
-`'winner'` (all or nothing to the top scorer), `'proportional'` (split by score),
-or `'split'` (even split among a `winners: [ids]` list that `getResult` returns —
-used by Trapdoor and Lightcycles for survivors). Optional per-game actions
+`getResult() → { winnerId, tiebreak, scores }`. Every minigame is
+winner-take-all — `winnerId` gets the entire pot. If yours can end with players
+genuinely level, use `decideWinner`/`drawFrom` from `./tiebreak.js` to draw one
+winner and set `tiebreak: true` so the results screen can say the pot was decided
+on a coin toss. Optional per-game actions
 (`boost`, `shoot`, `handleType`, `aim`/`drop`, `place`, `turn`) hang off the
 instance and are routed through
 `Room.handleAction`. Register it in `minigames/index.js` and it joins the rotation.
@@ -260,5 +270,5 @@ BETTING_MS=5000 TOTAL_ROUNDS=3 STARTING_BANKROLL=2000 DEFAULT_BUYIN=250 npm star
 ```
 
 Notable knobs: `STARTING_BANKROLL`, `LOW_STAKES_STIPEND`, `DEFAULT_BUYIN`,
-`ANTE_FRACTION`, `BET_FRACTION`, `MAX_BETS`, `TURN_MS`, `TOTAL_ROUNDS`,
+`BLIND_FRACTION`, `BET_FRACTION`, `MAX_BETS`, `TURN_MS`, `TOTAL_ROUNDS`,
 `RECONNECT_GRACE_MS`.

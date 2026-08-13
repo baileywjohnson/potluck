@@ -1,18 +1,27 @@
 // Lightcycles: a competitive Tron. Each rider moves at a constant speed on a
 // grid, leaving a solid trail. Run into ANY trail (yours or a rival's) or the
-// wall and you crash out. Last rider standing wins; if several survive to the
-// time cap — or everyone crashes on the same step — they split the pot.
+// wall and you crash out. The last rider standing takes the whole pot.
 // Fully server-authoritative (grid stepping + a trail grid for collisions).
+//
+// There's no meaningful time limit: every step lays down a cell, so the board
+// fills and someone must crash — the round always resolves itself. The duration
+// below is only a safety valve. Riders who crash head-on into each other on the
+// same step are genuinely level, so the pot is drawn by lot between them rather
+// than split (see ./tiebreak.js).
+
+import { decideWinner, drawFrom } from './tiebreak.js';
 
 const COLS = 56, ROWS = 34;
 const STEPS_PER_SEC = 14;        // grid cells crossed per second
-const DURATION_S = process.env.LIGHTCYCLE_DURATION ? Number(process.env.LIGHTCYCLE_DURATION) : 45;
+// Safety valve only. The board is 56x34 and a cell is consumed per rider per
+// step, so two riders exhaust it in about 68s and the round ends on its own well
+// before this — it exists so a room can never hang.
+const DURATION_S = process.env.LIGHTCYCLE_DURATION ? Number(process.env.LIGHTCYCLE_DURATION) : 90;
 
 export const lightcycle = {
   id: 'lightcycle',
   name: 'Lightcycles',
-  blurb: 'Leave a wall of light and box your rivals in. Crash into any trail or the wall and you are out — last rider standing wins.',
-  payout: 'split',
+  blurb: 'Leave a wall of light and box your rivals in. Crash into any trail or the wall and you are out — last rider standing takes the whole pot.',
   create(players) { return new LightcycleGame(players); },
 };
 
@@ -24,7 +33,8 @@ class LightcycleGame {
     this.elapsed = 0; this.timeLeft = DURATION_S;
     this.finished = false;
     this.newTrail = []; // cells laid since the last getState (for the client)
-    this.winners = null;
+    this.winnerId = null;
+    this.tiebreak = false;  // true when the pot had to be drawn by lot
 
     // Spawn riders along the two sides, facing inward (classic Tron start).
     const n = players.length, perSide = Math.ceil(n / 2);
@@ -95,7 +105,13 @@ class LightcycleGame {
   endNow() {
     if (this.finished) return;
     const alive = this.cycles.filter((c) => c.alive);
-    this.winners = alive.length >= 1 ? alive.map((c) => c.id) : this.lastAlive.slice();
+    // One rider left is the clean ending. Nobody left means the survivors took
+    // each other out on the same step, and more than one left means the safety
+    // cap fired — either way the group is level, so the pot is drawn between
+    // them rather than split.
+    const contenders = alive.length >= 1 ? alive.map((c) => c.id) : this.lastAlive.slice();
+    this.winnerId = drawFrom(contenders);
+    this.tiebreak = contenders.length > 1;
     this.finished = true;
   }
 
@@ -111,12 +127,14 @@ class LightcycleGame {
   }
 
   getResult() {
-    const ws = this.winners && this.winners.length ? this.winners : this.cycles.filter((c) => c.alive).map((c) => c.id);
     const survived = (c) => (c.outAt != null ? c.outAt : this.elapsed);
     const ranked = [...this.cycles].sort((a, b) => survived(b) - survived(a) || (a.id < b.id ? -1 : 1));
+    // The crashes settle it; fall back to whoever lasted longest only if the
+    // round was cut short before it resolved.
+    const fallback = decideWinner(ranked, survived);
     return {
-      winnerId: ws[0] ?? null,
-      winners: ws,
+      winnerId: this.winnerId ?? fallback.winnerId,
+      tiebreak: this.winnerId ? this.tiebreak : fallback.tiebreak,
       scores: ranked.map((c) => ({ id: c.id, name: c.name, score: Math.round(survived(c)) })),
     };
   }

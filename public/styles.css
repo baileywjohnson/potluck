@@ -160,17 +160,18 @@ button.ghost { background: transparent; }
 .timer { font-family: 'Caveat', cursive; font-size: 2.2rem; font-weight: 700; color: var(--accent-ink); }
 
 /* ===== Poker felt table ===== */
-.betting-screen { justify-content: center; width: 100%; max-width: 720px; }
+.betting-screen { justify-content: center; width: 100%; max-width: 920px; }
 .bet-head { width: 100%; display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 1rem; }
 .bet-head b { color: var(--ink); }
 .bet-stakes { color: var(--accent-ink); font-weight: 700; }
 
 .felt {
-  /* Fit within both the available height and width without distorting.
-     The generous top/bottom margins reserve room for seat labels that sit
-     just outside the rim. */
+  /* Fit within both the available height and width without distorting. The
+     margins reserve room for seat labels that sit just outside the rim, and
+     the 366px allows for the rest of the betting screen's chrome (heading,
+     action bar, status line) so the table takes every pixel that's left. */
   position: relative; aspect-ratio: 16 / 11;
-  width: min(92vw, 620px, calc(40vh * 16 / 11)); margin: 62px auto;
+  width: min(94vw, 860px, calc((100dvh - 366px) * 16 / 11)); margin: 50px auto;
   background: radial-gradient(ellipse at 50% 40%, #82bb6a 0%, #6fa85a 55%, #5e8f4c 100%);
   border: 13px solid var(--rail); border-radius: 47% / 50%;
   box-shadow: 6px 10px 0 var(--shadow), inset 0 0 0 3px #8a5a30, inset 0 0 44px rgba(54,38,20,.22);

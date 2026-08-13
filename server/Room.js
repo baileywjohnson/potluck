@@ -15,24 +15,6 @@ export const Phase = {
   GAMEOVER: 'gameover',
 };
 
-// Split `pot` among items by weight, using largest-remainder rounding so the
-// integer shares sum to `pot` exactly (no chips created or destroyed).
-function splitByWeights(items, pot) {
-  const totalW = items.reduce((s, it) => s + it.w, 0);
-  if (totalW <= 0 || pot <= 0) return {};
-  const shares = items.map((it) => {
-    const exact = (it.w / totalW) * pot;
-    const floor = Math.floor(exact);
-    return { id: it.id, floor, rem: exact - floor };
-  });
-  const distributed = shares.reduce((s, x) => s + x.floor, 0);
-  const leftover = pot - distributed;
-  shares.sort((a, b) => b.rem - a.rem);
-  const out = {};
-  shares.forEach((s, i) => { out[s.id] = s.floor + (i < leftover ? 1 : 0); });
-  return out;
-}
-
 // Map total XP to a level and progress within it. Each level costs a bit more
 // than the last (level N -> N+1 needs N*100 XP), so leveling slows over time.
 function levelInfo(xp) {
@@ -71,7 +53,7 @@ export class Room {
     this.minigame = null;          // registry entry for the current round
     this.game = null;              // live minigame instance during PLAYING
     this.poker = null;             // live PokerRound during BETTING (and held through the minigame)
-    this.ante = 0;                 // ante + bet increment for the current match
+    this.blind = 0;                // blind + bet increment for the current match
     this.betSize = 0;
     this.lastResult = null;        // payload shown during RESULTS
 
@@ -91,7 +73,7 @@ export class Room {
   // `account` (optional) is a logged-in user's saved row; when present the
   // player's progress is seeded from — and later written back to — their
   // account. Guests pass null and keep the old ephemeral behaviour.
-  addPlayer(socket, name, account = null) {
+  addPlayer(socket, name, account = null, deviceId = null) {
     const id = randomUUID();
     const token = randomUUID();
     // Joining once a match is underway means you watch this one and play the
@@ -102,6 +84,7 @@ export class Room {
       token,
       socketId: socket.id,
       userId: account?.id || null,        // links the seat to a saved account (null = guest)
+      deviceId,                           // which browser this seat was taken from
       name: account ? account.username : (name || 'Player').slice(0, 16),
       bankroll: account ? account.bankroll : CONFIG.STARTING_BANKROLL, // persistent wallet
       xp: account ? account.xp : 0,       // persistent experience (earned per minigame)
@@ -196,6 +179,15 @@ export class Room {
     this.broadcast();
   }
 
+  // The seat this browser already holds at this table, if any. One browser gets
+  // one seat per room — opening a second tab on the same room isn't a second
+  // player. (Different rooms in different tabs are fine, and reclaiming your own
+  // seat via `rejoin` is always allowed since it proves ownership with a token.)
+  findDeviceSeat(deviceId) {
+    if (!deviceId) return null;
+    return [...this.players.values()].find((p) => p.deviceId === deviceId) || null;
+  }
+
   cancelGrace(playerId) {
     const t = this.graceTimers.get(playerId);
     if (t) { clearTimeout(t); this.graceTimers.delete(playerId); }
@@ -264,10 +256,10 @@ export class Room {
     }
     this.persistAll(); // high-stakes buy-ins moved money out of wallets — save it
 
-    // Scale the ante and bet increment to the per-match stake so the betting
+    // Scale the blind and bet increment to the per-match stake so the betting
     // feels the same in low- and high-stakes.
     const stake = this.mode === 'high' ? this.buyIn : CONFIG.LOW_STAKES_STIPEND;
-    this.ante = Math.max(1, Math.round(stake * CONFIG.ANTE_FRACTION));
+    this.blind = Math.max(1, Math.round(stake * CONFIG.BLIND_FRACTION));
     this.betSize = Math.max(1, Math.round(stake * CONFIG.BET_FRACTION));
 
     this.round = 0;
@@ -294,10 +286,11 @@ export class Room {
     this.game = null;
     this.lastResult = null;
 
-    // Open the poker-style betting round for this minigame. Everyone antes;
-    // the dealer position rotates each round so first-to-act stays fair.
+    // Open the poker-style betting round for this minigame. The button posts the
+    // only forced bet and rotates each round, so the cost of sitting a hand out
+    // is spread evenly and first-to-act stays fair.
     this.poker = new PokerRound(this.participants(), {
-      ante: this.ante,
+      blind: this.blind,
       betSize: this.betSize,
       betCap: CONFIG.MAX_BETS,
       dealerIndex: this.round - 1,
@@ -505,28 +498,26 @@ export class Room {
 
     const result = this.game.getResult();
     const pot = this.poker.pot;
-    // How the pot is divided depends on the minigame's payout mode.
-    const payouts = this.computePayouts(result, pot);
-    for (const [id, amount] of Object.entries(payouts)) {
-      const p = this.players.get(id);
-      if (p) p.chips += amount;
-    }
-    // A minigame may have several co-winners (e.g. Trapdoor survivors split).
-    const winnerIds = (result.winners && result.winners.length)
-      ? result.winners : (result.winnerId ? [result.winnerId] : []);
-    const winnerSet = new Set(winnerIds);
-    for (const id of winnerIds) { const w = this.players.get(id); if (w) { w.wins += 1; w.lifetimeWins += 1; } }
+    // The pot is never divided — one player takes all of it. Minigames that can
+    // end in a genuine dead heat draw their single winner by lot (see
+    // minigames/tiebreak.js) rather than handing back a list of co-winners.
+    const winnerId = result.winnerId;
+    const payouts = winnerId ? { [winnerId]: pot } : {};
+    const winner = winnerId ? this.players.get(winnerId) : null;
+    if (winner) { winner.chips += pot; winner.wins += 1; winner.lifetimeWins += 1; }
 
     // Award XP: everyone who played the minigame earns it (base + score + win bonus).
     for (const s of result.scores) {
       this.awardXp(s.id, CONFIG.XP_BASE
         + Math.min(CONFIG.XP_SCORE_CAP, Math.max(0, s.score) * CONFIG.XP_PER_SCORE)
-        + (winnerSet.has(s.id) ? CONFIG.XP_WIN : 0));
+        + (s.id === winnerId ? CONFIG.XP_WIN : 0));
     }
 
     this.persistAll(); // XP + lifetime wins changed this round
 
-    this.lastResult = this.buildResult({ winnerId: result.winnerId, winners: winnerIds, scores: result.scores, payouts });
+    this.lastResult = this.buildResult({
+      winnerId, scores: result.scores, tiebreak: !!result.tiebreak, payouts,
+    });
     this.poker = null;
     this.setPhase(Phase.RESULTS, CONFIG.RESULTS_MS, () => this.beginBetting());
   }
@@ -536,36 +527,11 @@ export class Room {
     if (p) p.xp = (p.xp || 0) + Math.max(0, Math.round(amount));
   }
 
-  // Decide who gets what from the pot.
-  //   'winner'       — the whole pot to the top scorer (all or nothing).
-  //   'proportional' — split by score, so everyone who scored wins a share.
-  computePayouts(result, pot) {
-    const mode = this.minigame?.payout || 'winner';
-    const scores = result.scores || [];
-    if (pot <= 0 || scores.length === 0) {
-      return result.winnerId ? { [result.winnerId]: pot } : {};
-    }
-    if (mode === 'proportional') {
-      const totalScore = scores.reduce((s, x) => s + Math.max(0, x.score), 0);
-      // If nobody scored, hand everyone their share back evenly.
-      const items = scores.map((s) => ({ id: s.id, w: totalScore > 0 ? Math.max(0, s.score) : 1 }));
-      return splitByWeights(items, pot);
-    }
-    if (mode === 'split') {
-      // Split the pot evenly among the winners (one survivor, the finalists, or
-      // — if everyone dropped together — the last group). Exact integer split.
-      const ws = (result.winners && result.winners.length)
-        ? result.winners : (result.winnerId ? [result.winnerId] : []);
-      return ws.length ? splitByWeights(ws.map((id) => ({ id, w: 1 })), pot) : {};
-    }
-    return result.winnerId ? { [result.winnerId]: pot } : {};
-  }
-
   // Summarize the round for the results screen. Reads pot/contributions from the
   // (still-live) poker round, so call this before clearing `this.poker`.
-  buildResult({ winnerId, winners = [], scores, uncontested = false, payouts = {} }) {
+  buildResult({ winnerId, scores, uncontested = false, tiebreak = false, payouts = {} }) {
     const pot = this.poker.pot;
-    const contributed = this.poker.contributed;
+    const contributed = this.poker.committed;
     const folded = new Set(this.poker.folded);
 
     // Per-player chip outcome: what they put in vs. what they took.
@@ -581,12 +547,11 @@ export class Room {
 
     return {
       round: this.round,
-      minigame: { id: this.minigame.id, name: this.minigame.name, payout: this.minigame.payout || 'winner' },
+      minigame: { id: this.minigame.id, name: this.minigame.name },
       winnerId,
       winnerName: winnerId ? this.players.get(winnerId)?.name ?? null : null,
-      // Names of everyone splitting the pot (for "A & B split…" on the results screen).
-      winnerNames: winners.map((id) => this.players.get(id)?.name).filter(Boolean),
       uncontested,
+      tiebreak,   // the round ended level and the pot was drawn by lot
       pot,
       scores,
       breakdown,
@@ -699,13 +664,13 @@ export class Room {
       hostId: this.hostId,
       mode: this.mode,
       buyIn: this.buyIn,
-      ante: this.ante,
+      blind: this.blind,
       betSize: this.betSize,
       round: this.round,
       totalRounds: CONFIG.TOTAL_ROUNDS,
       phaseEndsAt: this.phaseEndsAt,
       minigame: this.minigame
-        ? { id: this.minigame.id, name: this.minigame.name, blurb: this.minigame.blurb, payout: this.minigame.payout || 'winner' }
+        ? { id: this.minigame.id, name: this.minigame.name, blurb: this.minigame.blurb }
         : null,
       players: [...this.players.values()].map((p) => ({
         id: p.id, name: p.name, bankroll: p.bankroll, chips: p.chips,

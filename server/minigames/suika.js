@@ -4,6 +4,8 @@
 // line, your jar freezes (you're out). Fully server-authoritative — a compact
 // circle physics sim (gravity + positional collision solver + merging).
 
+import { decideWinner } from './tiebreak.js';
+
 // Harder: a narrower jar with a lower danger line (less room), a less forgiving
 // top-out grace, and bigger/more varied fruit to drop.
 const W = 210, H = 320;          // jar interior (logical units) — narrower than before
@@ -31,8 +33,7 @@ const randDrop = () => {
 export const suika = {
   id: 'suika',
   name: 'Fruit Drop',
-  blurb: 'Drop fruit into your jar — matching fruits merge into bigger ones. Most points wins; overflow the top and you are out.',
-  payout: 'winner',
+  blurb: 'Drop fruit into your jar — matching fruits merge into bigger ones. Most points takes the whole pot; overflow the top and you are out.',
   create(players) { return new SuikaGame(players); },
 };
 
@@ -189,9 +190,19 @@ class SuikaGame {
   }
 
   getResult() {
-    const ranked = [...this.boards].sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : 1));
+    // Topping out means you're OUT — you can't win the pot no matter how many
+    // points you banked before overflowing. Survivors rank above topped-out
+    // jars; within each group it's highest score. (If *everyone* topped out the
+    // pot still has to go somewhere, so the best of them takes it.)
+    const ranked = [...this.boards].sort((a, b) =>
+      (a.toppedOut ? 1 : 0) - (b.toppedOut ? 1 : 0)
+      || b.score - a.score
+      || (a.id < b.id ? -1 : 1));
+    // A dead heat on score (within the same in/out group) is drawn by lot.
+    const { winnerId, tiebreak } = decideWinner(ranked, (b) => `${b.toppedOut ? 'out' : 'in'}:${b.score}`);
     return {
-      winnerId: ranked[0]?.id ?? null,
+      winnerId,
+      tiebreak,
       scores: ranked.map((b) => ({ id: b.id, name: b.name, score: b.score })),
     };
   }

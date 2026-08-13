@@ -7,6 +7,8 @@
 // Paragraphs are ~250 characters, so a 100 WPM typist (~500 chars/min) finishes
 // in about 30 seconds.
 
+import { decideWinner } from './tiebreak.js';
+
 const PARAGRAPHS = [
   "The old lighthouse stood at the edge of the cliff, its faded paint peeling in the salty wind. Each evening the keeper climbed the spiral stairs to light the great lamp, watching the waves crash far below as weary ships drifted toward the calm harbor.",
   "Deep in the quiet forest a narrow path wound between tall pines and mossy stones. Sunlight slipped through the branches in soft golden streaks, and the only sound was the gentle rush of a hidden stream tumbling over rocks on its long journey to the sea.",
@@ -28,8 +30,7 @@ function matchLen(typed, target) {
 export const typeRace = {
   id: 'typeRace',
   name: 'Type Race',
-  blurb: 'Type the paragraph correctly — first slug to the finish line wins. Mistakes stall you until you fix them.',
-  payout: 'winner', // a race: first to finish takes the whole pot
+  blurb: 'Type the paragraph correctly — first slug to the finish line takes the whole pot. Mistakes stall you until you fix them.',
 
   create(players) {
     return new TypeRaceGame(players);
@@ -90,7 +91,9 @@ class TypeRaceGame {
     };
   }
 
-  // Finishers first (earliest wins); then by how far everyone else got.
+  // Finishers first (earliest wins); then by how far everyone else got. If the
+  // clock runs out with nobody home and the leaders are level on characters,
+  // the pot is drawn by lot between them.
   getResult() {
     const ranked = [...this.players].sort((a, b) => {
       const af = a.finishTime != null, bf = b.finishTime != null;
@@ -98,8 +101,11 @@ class TypeRaceGame {
       if (af !== bf) return af ? -1 : 1;
       return b.progress - a.progress || (a.id < b.id ? -1 : 1);
     });
+    const { winnerId, tiebreak } = decideWinner(ranked, (p) =>
+      p.finishTime != null ? `done:${p.finishTime}` : `at:${p.progress}`);
     return {
-      winnerId: ranked[0]?.id ?? null,
+      winnerId,
+      tiebreak,
       scores: ranked.map((p) => ({ id: p.id, name: p.name, score: this.wpm(p) })),
     };
   }

@@ -6,6 +6,8 @@
 // Room expects. To add a new minigame, export the same shape from a new
 // file and register it in ./index.js.
 
+import { decideWinner } from './tiebreak.js';
+
 const ARENA = { width: 900, height: 560 };
 const PLAYER_RADIUS = 18;
 const COIN_RADIUS = 11;
@@ -37,10 +39,7 @@ export const coinRush = {
   id: 'coinRush',
   name: 'Coin Rush',
   // Shown to players during betting so they know what they're wagering on.
-  blurb: 'Grab coins for 20 seconds. Move with WASD / arrows, press Space to lunge.',
-  // 'proportional' = the pot is split by score (coins), so everyone who grabs
-  // coins wins a share. (Default for a minigame is 'winner' — winner takes all.)
-  payout: 'proportional',
+  blurb: 'Grab coins for 20 seconds. Move with WASD / arrows, press Space to lunge. Most coins takes the whole pot.',
 
   create(players) {
     return new CoinRushGame(players);
@@ -190,13 +189,16 @@ class CoinRushGame {
     };
   }
 
-  // Final outcome. Highest score wins; ties broken by lowest id (stable).
+  // Final outcome. Most coins takes the whole pot; a dead heat on coins is
+  // drawn by lot rather than handed to whoever sorts first.
   getResult() {
     const ranked = [...this.players].sort(
       (a, b) => b.score - a.score || (a.id < b.id ? -1 : 1)
     );
+    const { winnerId, tiebreak } = decideWinner(ranked, (p) => p.score);
     return {
-      winnerId: ranked[0]?.id ?? null,
+      winnerId,
+      tiebreak,
       scores: ranked.map((p) => ({ id: p.id, name: p.name, score: p.score })),
     };
   }
